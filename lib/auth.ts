@@ -7,23 +7,23 @@ export const auth = {
   // Sign up with email and password
   signUp: async (email: string, password: string, metadata: { first_name: string; last_name: string }) => {
     try {
-      if (!metadata?.first_name?.trim() || !metadata?.last_name?.trim()) {
-        return { 
-          data: null, 
-          error: { message: 'First name and last name are required' } 
+    if (!metadata?.first_name?.trim() || !metadata?.last_name?.trim()) {
+      return { 
+        data: null, 
+        error: { message: 'First name and last name are required' } 
+      }
+    }
+
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: metadata.first_name.trim(),
+          last_name: metadata.last_name.trim()
         }
       }
-
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            first_name: metadata.first_name.trim(),
-            last_name: metadata.last_name.trim()
-          }
-        }
-      })
+    })
 
       if (error) {
         return { data: null, error };
@@ -64,9 +64,9 @@ export const auth = {
   // Sign in with GitHub
   signInWithGitHub: async () => {
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'github',
-        options: {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'github',
+      options: {
           redirectTo: window.location.origin,
           scopes: 'read:user user:email',
         }

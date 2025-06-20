@@ -264,16 +264,27 @@ export const UserProfile = () => {
   }
 
   const getDisplayName = () => {
-    return profileData?.username || user?.email?.split('@')[0] || 'Operator';
+    // First try GitHub username from metadata
+    const githubUsername = user?.user_metadata?.user_name || user?.user_metadata?.preferred_username
+    // Then try profile username
+    const profileUsername = profileData?.username
+    // Then try email username
+    const emailUsername = user?.email?.split('@')[0]
+    // Finally fallback to 'Operator'
+    return githubUsername || profileUsername || emailUsername || 'Operator'
   }
 
   const getInitials = () => {
-    const displayName = getDisplayName();
-    const parts = displayName.split(' ');
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    }
-    return displayName.substring(0, 2).toUpperCase();
+    const displayName = getDisplayName()
+    return displayName.substring(0, 2).toUpperCase()
+  }
+
+  const getAvatarUrl = () => {
+    // First try profile avatar
+    const profileAvatar = profileData?.avatar_url
+    // Then try GitHub avatar from metadata
+    const githubAvatar = user?.user_metadata?.avatar_url
+    return profileAvatar || githubAvatar || ''
   }
 
   const formatDate = (dateString: string) => {
@@ -438,8 +449,8 @@ export const UserProfile = () => {
       <div className="flex items-center space-x-6 mb-8">
         <div className="relative group">
           <Avatar className="h-24 w-24 ring-2 ring-green-500/20 ring-offset-2 ring-offset-black transition-all duration-300 group-hover:ring-green-500/40">
-            <AvatarImage src={profileData?.avatar_url || ''} />
-            <AvatarFallback className="bg-green-900/20 text-green-400">{profileData?.username?.charAt(0).toUpperCase()}</AvatarFallback>
+            <AvatarImage src={getAvatarUrl()} />
+            <AvatarFallback className="bg-green-900/20 text-green-400">{getInitials()}</AvatarFallback>
           </Avatar>
           <div className="absolute -bottom-2 -right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
             <div className="relative">
@@ -473,7 +484,7 @@ export const UserProfile = () => {
           </div>
         </div>
         <div>
-          <h2 className="text-2xl font-bold text-green-400 mb-1">{profileData?.username || 'Operator'}</h2>
+          <h2 className="text-2xl font-bold text-green-400 mb-1">{getDisplayName()}</h2>
           <p className="text-sm font-medium" style={{ color: currentRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
                                                               currentRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
                                                               currentRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400

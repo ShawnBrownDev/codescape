@@ -63,27 +63,28 @@ export const auth = {
 
   // Sign in with GitHub
   signInWithGitHub: async () => {
-    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID
-    if (!clientId) {
-      return { 
-        data: null, 
-        error: { message: 'GitHub client ID is not configured' }
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          redirectTo: window.location.origin,
+          scopes: 'read:user user:email',
+        }
+      })
+
+      if (error) {
+        console.error('GitHub auth error:', error)
+        return { data: null, error }
+      }
+
+      return { data, error: null }
+    } catch (err: any) {
+      console.error('Unexpected GitHub auth error:', err)
+      return {
+        data: null,
+        error: { message: err.message || 'Failed to authenticate with GitHub' }
       }
     }
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-          client_id: clientId
-        },
-        skipBrowserRedirect: false
-      }
-    })
-    return { data, error }
   },
 
   // Sign out

@@ -49,6 +49,15 @@ const nextConfig = {
       ],
     }
   },
+  async redirects() {
+    return [
+      {
+        source: '/auth/callback',
+        destination: '/dashboard',
+        permanent: true,
+      },
+    ]
+  },
 };
 
 module.exports = nextConfig;

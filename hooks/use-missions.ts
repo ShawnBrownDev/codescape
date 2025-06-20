@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -12,190 +12,173 @@ export interface Mission {
   simulation_id?: string
   time_requirement?: number
   rank_requirement?: number
+  created_at: string
   expires_at?: string
 }
 
 export interface UserMission {
   id: string
+  user_id: string
   mission_id: string
   progress: number
   completed: boolean
   completed_at?: string
+  created_at: string
 }
 
 export interface UserXP {
+  user_id: string
   total_xp: number
   current_level: number
+  created_at: string
+  updated_at: string
 }
 
 export function useMissions() {
   const { user } = useAuth()
   const [missions, setMissions] = useState<Mission[]>([])
   const [userMissions, setUserMissions] = useState<UserMission[]>([])
-  const [userXP, setUserXP] = useState<UserXP>({ total_xp: 0, current_level: 1 })
+  const [userXP, setUserXP] = useState<UserXP>({ 
+    user_id: '',
+    total_xp: 0, 
+    current_level: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    console.log('useMissions effect running, user:', user?.id)
-    
     if (!user) {
-      console.log('No user, skipping missions fetch')
-      setLoading(false)
       return
     }
 
-    const fetchMissions = async () => {
-      try {
-        console.log('Fetching missions data...')
-        setLoading(true)
-        setError(null)
+    const fetchData = async () => {
+      setLoading(true)
 
-        // Fetch active missions
-        const { data: missionsData, error: missionsError } = await supabase
-          .from('missions')
-          .select('*')
-          .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+      // Fetch missions
+      const { data: missionsData, error: missionsError } = await supabase
+        .from('missions')
+        .select('*')
 
-        if (missionsError) {
-          console.error('Error fetching missions:', missionsError)
-          throw missionsError
-        }
-
-        console.log('Missions fetched:', missionsData?.length)
-
-        // Fetch user's mission progress
-        const { data: userMissionsData, error: userMissionsError } = await supabase
-          .from('user_missions')
-          .select('*')
-          .eq('user_id', user.id)
-
-        if (userMissionsError) {
-          console.error('Error fetching user missions:', userMissionsError)
-          throw userMissionsError
-        }
-
-        console.log('User missions fetched:', userMissionsData?.length)
-
-        // Fetch user's XP
-        const { data: userXPData, error: userXPError } = await supabase
-          .from('user_xp')
-          .select('*')
-          .eq('user_id', user.id)
-          .single()
-
-        // Only throw XP error if it's not a "no rows returned" error
-        if (userXPError && userXPError.code !== 'PGRST116') {
-          console.error('Error fetching user XP:', userXPError)
-          throw userXPError
-        }
-
-        console.log('User XP fetched:', userXPData)
-
-        setMissions(missionsData || [])
-        setUserMissions(userMissionsData || [])
-        setUserXP(userXPData || { total_xp: 0, current_level: 1 })
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'An error occurred'
-        console.error('Error in fetchMissions:', errorMessage)
-        setError(errorMessage)
-        // Don't let errors prevent the app from loading
-        setMissions([])
-        setUserMissions([])
-        setUserXP({ total_xp: 0, current_level: 1 })
-      } finally {
-        console.log('Fetch missions complete, setting loading false')
-        setLoading(false)
+      if (missionsError) {
+        console.error('Error fetching missions:', missionsError)
+        return
       }
+
+      setMissions(missionsData as Mission[] || [])
+
+      // Fetch user missions
+      const { data: userMissionsData, error: userMissionsError } = await supabase
+        .from('user_missions')
+        .select('*')
+        .eq('user_id', user.id)
+
+      if (userMissionsError) {
+        console.error('Error fetching user missions:', userMissionsError)
+        return
+      }
+
+      setUserMissions(userMissionsData as UserMission[] || [])
+
+      // Fetch user XP
+      const { data: userXPData, error: userXPError } = await supabase
+        .from('user_xp')
+        .select('*')
+        .eq('user_id', user.id)
+        .single()
+
+      if (userXPError) {
+        console.error('Error fetching user XP:', userXPError)
+        return
+      }
+
+      if (userXPData) {
+        setUserXP(userXPData as UserXP)
+      }
+      setLoading(false)
     }
 
-    fetchMissions()
+    fetchData()
 
-    // Subscribe to real-time updates
+    // Subscribe to user missions changes
     const userMissionsSubscription = supabase
       .channel('user_missions_changes')
-      .on(
-        'postgres_changes',
+      .on<UserMission>(
+        'postgres_changes' as never,
         {
           event: '*',
           schema: 'public',
           table: 'user_missions',
-          filter: `user_id=eq.${user.id}`
+          filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
-          console.log('User missions update received:', payload)
-          fetchMissions()
+        (payload: { new: UserMission }) => {
+          setUserMissions((current) => {
+            const updated = [...current]
+            const index = updated.findIndex((m) => m.id === payload.new.id)
+            if (index !== -1) {
+              updated[index] = payload.new
+            } else {
+              updated.push(payload.new)
+            }
+            return updated
+          })
         }
       )
       .subscribe()
 
+    // Subscribe to user XP changes
     const userXPSubscription = supabase
       .channel('user_xp_changes')
-      .on(
-        'postgres_changes',
+      .on<UserXP>(
+        'postgres_changes' as never,
         {
           event: '*',
           schema: 'public',
           table: 'user_xp',
-          filter: `user_id=eq.${user.id}`
+          filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
-          console.log('User XP update received:', payload)
-          fetchMissions()
+        (payload: { new: UserXP }) => {
+          setUserXP(payload.new)
         }
       )
       .subscribe()
 
     return () => {
-      console.log('Cleaning up subscriptions')
       userMissionsSubscription.unsubscribe()
       userXPSubscription.unsubscribe()
     }
-  }, [user])
+  }, [user, supabase])
 
   const updateMissionProgress = async (missionId: string) => {
     if (!user) {
-      console.log('No user, cannot update mission progress')
       return
     }
 
-    try {
-      console.log('Updating mission progress:', missionId)
-      const { data, error } = await supabase.rpc('complete_mission', {
-        p_user_id: user.id,
-        p_mission_id: missionId
-      })
+    const { data, error } = await supabase.rpc('complete_mission', {
+      p_user_id: user.id,
+      p_mission_id: missionId,
+    })
 
-      if (error) {
-        console.error('Error updating mission progress:', error)
-        throw error
-      }
-
-      console.log('Mission progress updated:', data)
-      return data
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred'
-      console.error('Error in updateMissionProgress:', errorMessage)
-      setError(errorMessage)
-      return null
+    if (error) {
+      console.error('Error updating mission progress:', error)
+      return
     }
+
+    return data
   }
 
   const getMissionProgress = (missionId: string) => {
-    const userMission = userMissions.find(um => um.mission_id === missionId)
-    return {
-      progress: userMission?.progress || 0,
-      completed: userMission?.completed || false,
-      completedAt: userMission?.completed_at
-    }
+    return userMissions.find((um) => um.mission_id === missionId)
   }
 
   return {
     missions,
+    userMissions,
     userXP,
     loading,
     error,
     updateMissionProgress,
-    getMissionProgress
+    getMissionProgress,
   }
 } 

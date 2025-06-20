@@ -26,7 +26,6 @@ export const auth = {
       })
 
       if (error) {
-        console.error('Signup error:', error);
         return { data: null, error };
       }
 
@@ -40,15 +39,12 @@ export const auth = {
             last_name: metadata.last_name.trim()
           });
         if (profileError) {
-          console.error('Error creating profile:', profileError);
-        } else {
-          console.log('Profile created successfully:', profileData);
+          return { data: null, error: profileError };
         }
       }
 
       return { data, error: null };
     } catch (err) {
-      console.error('Unexpected error during signup:', err);
       return {
         data: null,
         error: { message: 'An unexpected error occurred during signup' }
@@ -96,5 +92,22 @@ export const auth = {
   getSession: async () => {
     const { data: { session }, error } = await supabase.auth.getSession()
     return { session, error }
+  }
+}
+
+export async function createUserProfile(user: User) {
+  try {
+    const { data: profileData, error } = await supabase.rpc('create_user_profile', {
+      user_id: user.id,
+      user_email: user.email || '',
+      first_name: user.user_metadata?.first_name || null,
+      last_name: user.user_metadata?.last_name || null
+    });
+
+    if (error) throw error;
+    return profileData;
+  } catch (error) {
+    console.error('Error creating user profile:', error);
+    throw error;
   }
 }

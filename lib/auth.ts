@@ -64,9 +64,9 @@ export const auth = {
   // Sign in with GitHub
   signInWithGitHub: async () => {
     try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
+      const { data: authData, error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
           redirectTo: window.location.origin,
           scopes: 'read:user user:email',
         }
@@ -77,7 +77,28 @@ export const auth = {
         return { data: null, error }
       }
 
-      return { data, error: null }
+      // After successful GitHub auth, create/update user profile
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (user) {
+        try {
+          const { data: profileData, error: profileError } = await supabase
+            .rpc('create_user_profile', {
+              user_id: user.id,
+              user_email: user.email || '',
+              username: user.user_metadata?.user_name || user.user_metadata?.preferred_username,
+              avatar_url: user.user_metadata?.avatar_url
+            });
+
+          if (profileError) {
+            console.error('Error creating GitHub user profile:', profileError);
+          }
+        } catch (err) {
+          console.error('Error in GitHub profile creation:', err);
+        }
+      }
+
+      return { data: authData, error: null }
     } catch (err: any) {
       console.error('Unexpected GitHub auth error:', err)
       return {

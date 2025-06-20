@@ -12,7 +12,7 @@ const inter = Inter({ subsets: ['latin'] });
 initializeRanks().catch(console.error);
 
 export const metadata: Metadata = {
-  title: 'Escape Room Master - Ultimate Puzzle Adventure',
+  title: 'Codescape - Ultimate Puzzle Adventure',
   description: 'Challenge your mind with immersive escape rooms. Solve puzzles, crack codes, and race against time in thrilling adventures.',
 };
 

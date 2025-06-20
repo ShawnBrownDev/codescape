@@ -37,13 +37,13 @@ export function AuthForm() {
       <CardHeader>
         <CardTitle className="text-green-500">
           {isSignUp ? "Create Access Code" : "Enter Access Code"}
-        </CardTitle>
+          </CardTitle>
         <CardDescription className="text-green-500/70">
           {isSignUp
             ? "Join the resistance against the machines"
             : "Return to the digital battlefield"}
-        </CardDescription>
-      </CardHeader>
+          </CardDescription>
+        </CardHeader>
       <CardContent>
         <form onSubmit={isSignUp ? handleSignUp : handleSignIn} className="grid gap-4">
           {isSignUp && (
@@ -72,8 +72,8 @@ export function AuthForm() {
           <AuthFormInput
             id="email"
             label="Email"
-            type="email"
-            value={formData.email}
+                      type="email"
+                      value={formData.email}
             onChange={(value) => updateFormData("email", value)}
             placeholder="neo@matrix.com"
             autoComplete="email"
@@ -83,7 +83,7 @@ export function AuthForm() {
             id="password"
             label="Password"
             type="password"
-            value={formData.password}
+                      value={formData.password}
             onChange={(value) => updateFormData("password", value)}
             placeholder="••••••••"
             autoComplete={isSignUp ? "new-password" : "current-password"}
@@ -92,7 +92,7 @@ export function AuthForm() {
           <AuthFormStatus
             error={formState.error}
             success={formState.success}
-          />
+                      />
 
           <AuthFormActions
             isLoading={formState.isLoading}
@@ -101,8 +101,8 @@ export function AuthForm() {
             onGitHubSignIn={handleGitHubSignIn}
             onToggleMode={toggleMode}
           />
-        </form>
-      </CardContent>
-    </Card>
+              </form>
+        </CardContent>
+      </Card>
   )
 }

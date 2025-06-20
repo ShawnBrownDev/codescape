@@ -1,12 +1,17 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogOut, Mail, Calendar, Terminal, Shield, Upload, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { useToast } from '@/hooks/use-toast'
+import { calculateRankFromDB, calculateProgress, formatXP, type RankInfo, fetchRanks } from '@/lib/utils'
+import { Progress } from '@/components/ui/progress'
+import type { AuthError } from '@supabase/supabase-js'
+import { useRouter } from 'next/navigation'
+import { cn } from '@/lib/utils'
 
 interface UserProfileData {
   username: string
@@ -14,59 +19,248 @@ interface UserProfileData {
   created_at: string
 }
 
+interface UserXP {
+  total_xp: number
+  current_level: number
+}
+
+interface UserMissions {
+  completed_count: number
+}
+
 export const UserProfile = () => {
   const { user, signOut } = useAuth()
   const [profileData, setProfileData] = useState<UserProfileData | null>(null)
+  const [userXP, setUserXP] = useState<UserXP>({ total_xp: 0, current_level: 1 })
+  const [missionCount, setMissionCount] = useState<number>(0)
   const [loading, setLoading] = useState(true)
+  const [currentRank, setCurrentRank] = useState<RankInfo | null>(null)
+  const [nextRank, setNextRank] = useState<RankInfo | null>(null)
+  const [progressToNextRank, setProgressToNextRank] = useState<number>(0)
   const [uploading, setUploading] = useState(false)
+  const [isUpdating, setIsUpdating] = useState(false)
   const { toast } = useToast()
+  const router = useRouter()
+  
+  // Create refs to store channel instances and previous values
+  const xpChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const missionsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const previousXPRef = useRef<number>(0)
+  const animationFrameRef = useRef<number>()
+
+  const animateXPChange = useCallback((startXP: number, endXP: number) => {
+    const duration = 1000 // 1 second animation
+    const startTime = performance.now()
+    
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      
+      // Easing function for smooth animation
+      const easeOutQuart = 1 - Math.pow(1 - progress, 4)
+      const currentXP = Math.floor(startXP + (endXP - startXP) * easeOutQuart)
+      
+      setUserXP(prev => ({ ...prev, total_xp: currentXP }))
+      
+      if (progress < 1) {
+        animationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        setIsUpdating(false)
+      }
+    }
+    
+    animationFrameRef.current = requestAnimationFrame(animate)
+  }, [])
+
+  const updateRankInfo = useCallback(async (xp: number, animate: boolean = false) => {
+    try {
+      const ranks = await fetchRanks();
+      const currentRankInfo = ranks.find(rank => xp >= rank.min_xp && xp <= rank.max_xp);
+      if (!currentRankInfo) return;
+
+      const nextRankInfo = ranks.find(rank => rank.level === currentRankInfo.level + 1) || null;
+      
+      // If animating, smoothly update the progress
+      if (animate) {
+        setIsUpdating(true)
+        animateXPChange(previousXPRef.current, xp)
+      } else {
+        setUserXP(prev => ({ ...prev, total_xp: xp }))
+      }
+      
+      previousXPRef.current = xp
+      
+      setCurrentRank(currentRankInfo)
+      setNextRank(nextRankInfo)
+      setProgressToNextRank(calculateProgress(xp, currentRankInfo, nextRankInfo))
+
+      // Show rank up notification if rank changed
+      if (currentRank && currentRankInfo.level > currentRank.level) {
+        toast({
+          title: "Rank Up!",
+          description: `Congratulations! You've reached ${currentRankInfo.title}!`,
+          variant: "default",
+          className: "bg-green-950 border-green-500 text-green-400",
+        })
+      }
+    } catch (error) {
+      console.error('Error updating rank info:', error)
+      setIsUpdating(false)
+    }
+  }, [currentRank, toast, animateXPChange])
 
   const fetchUserProfile = useCallback(async () => {
     if (!user?.id) return;
     
     try {
-      const { data, error } = await supabase
+      // Fetch profile data
+      const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('username, avatar_url, created_at')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (error) {
-        console.error('Error fetching profile:', error);
-        return;
+      if (profileError) throw profileError;
+
+      // Fetch XP data
+      const { data: xpData, error: xpError } = await supabase
+        .from('user_xp')
+        .select('total_xp, current_level')
+        .eq('user_id', user.id)
+        .single();
+
+      if (xpError) throw xpError;
+
+      // Fetch completed missions count
+      const { count: missionsCount, error: missionsError } = await supabase
+        .from('user_missions')
+        .select('*', { count: 'exact' })
+        .eq('user_id', user.id)
+        .eq('completed', true);
+
+      if (missionsError) throw missionsError;
+
+      if (profileData) {
+        setProfileData(profileData);
+      }
+      
+      if (xpData) {
+        setUserXP(xpData);
+        await updateRankInfo(xpData.total_xp);
       }
 
-      if (data) {
-        setProfileData(data);
-      } else {
-        // Create a new profile using our function
-        const { data: newProfile, error: createError } = await supabase
-          .rpc('create_user_profile', {
-            user_id: user.id,
-            user_email: user.email || ''
-          });
+      setMissionCount(missionsCount || 0);
 
-        if (createError) {
-          console.error('Error creating profile:', createError);
-        } else {
-          setProfileData(newProfile);
-        }
-      }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error fetching user data:', error);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, updateRankInfo]);
 
   useEffect(() => {
     if (user) {
-      fetchUserProfile()
+      fetchUserProfile();
+
+      // Clean up existing subscriptions
+      if (xpChannelRef.current) {
+        xpChannelRef.current.unsubscribe();
+      }
+      if (missionsChannelRef.current) {
+        missionsChannelRef.current.unsubscribe();
+      }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+
+      // Create new channel for XP with optimistic updates
+      xpChannelRef.current = supabase.channel(`user_xp_${user.id}`)
+      xpChannelRef.current
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'user_xp',
+          filter: `user_id=eq.${user.id}`
+        }, async (payload) => {
+          if (payload.new) {
+            const newXP = payload.new as UserXP
+            await updateRankInfo(newXP.total_xp, true) // Animate the change
+          }
+        })
+        .subscribe()
+
+      // Create new channel for missions with optimistic updates
+      missionsChannelRef.current = supabase.channel(`user_missions_${user.id}`)
+      missionsChannelRef.current
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'user_missions',
+          filter: `user_id=eq.${user.id}`
+        }, async (payload) => {
+          if (payload.eventType === 'INSERT' && payload.new.completed) {
+            // Optimistically update mission count
+            setMissionCount(prev => prev + 1)
+          }
+          
+          // Verify count in background
+          const { count } = await supabase
+            .from('user_missions')
+            .select('*', { count: 'exact' })
+            .eq('user_id', user.id)
+            .eq('completed', true)
+          
+          setMissionCount(count || 0)
+        })
+        .subscribe()
+
+      return () => {
+        // Clean up subscriptions and animations
+        if (xpChannelRef.current) {
+          xpChannelRef.current.unsubscribe()
+          xpChannelRef.current = null
+        }
+        if (missionsChannelRef.current) {
+          missionsChannelRef.current.unsubscribe()
+          missionsChannelRef.current = null
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current)
+        }
+      }
     }
-  }, [user, fetchUserProfile])
+  }, [user, fetchUserProfile, updateRankInfo])
 
   const handleSignOut = async () => {
-    await signOut()
+    if (loading) return; // Prevent multiple clicks
+    
+    try {
+      setLoading(true)
+      const { error } = await signOut()
+      
+      if (error && error.message !== 'Auth session missing!') {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to terminate session. Please try again.",
+          variant: "destructive",
+        })
+        console.error('Error signing out:', error)
+        return;
+      }
+
+      // If successful or if session was already missing, redirect to home
+      router.push('/')
+      
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
+        variant: "destructive",
+      })
+      console.error('Unexpected error during sign out:', error)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const getDisplayName = () => {
@@ -215,82 +409,141 @@ export const UserProfile = () => {
     }
   };
 
-  if (!user) return null
+  // Update the XP display in the UI
+  const XPDisplay = ({ xp }: { xp: number }) => (
+    <div className={cn(
+      "text-2xl font-bold text-emerald-400",
+      isUpdating && "transition-all duration-200"
+    )}>
+      {formatXP(xp)}
+    </div>
+  )
+
+  if (!user || !currentRank) return null
 
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse space-y-4">
+          <div className="animate-pulse space-y-4">
           <div className="h-20 w-20 bg-green-900/30 rounded-full mx-auto"></div>
           <div className="h-4 bg-green-900/30 rounded w-3/4 mx-auto"></div>
           <div className="h-4 bg-green-900/30 rounded w-1/2 mx-auto"></div>
         </div>
-      </div>
+          </div>
     )
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col items-center text-center">
-        <div className="relative">
-          <Avatar className="h-24 w-24 mb-4">
-            {profileData?.avatar_url ? (
-              <AvatarImage src={profileData.avatar_url} />
-            ) : (
-              <AvatarFallback className="bg-green-900/30 text-green-400 text-xl">
-                {getInitials()}
-              </AvatarFallback>
-            )}
+    <div className="p-6 space-y-6 bg-black/40 rounded-lg border border-green-500/20">
+      <div className="flex items-center space-x-6 mb-8">
+        <div className="relative group">
+          <Avatar className="h-24 w-24 ring-2 ring-green-500/20 ring-offset-2 ring-offset-black transition-all duration-300 group-hover:ring-green-500/40">
+            <AvatarImage src={profileData?.avatar_url || ''} />
+            <AvatarFallback className="bg-green-900/20 text-green-400">{profileData?.username?.charAt(0).toUpperCase()}</AvatarFallback>
           </Avatar>
-          <div className="absolute -bottom-2 right-0 flex gap-2">
-            <label 
-              htmlFor="avatar-upload" 
-              className="p-1.5 rounded-full bg-green-900/30 cursor-pointer hover:bg-green-900/50 transition-colors"
-              title="Upload photo"
-            >
-              <Upload className="h-4 w-4 text-green-400" />
+          <div className="absolute -bottom-2 -right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            <div className="relative">
               <input
-                id="avatar-upload"
                 type="file"
                 accept="image/*"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 onChange={uploadAvatar}
                 disabled={uploading}
-                className="hidden"
               />
-            </label>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-8 w-8 bg-black/60 backdrop-blur-sm border-green-500/30 hover:bg-green-900/20 transition-colors duration-200"
+                disabled={uploading}
+              >
+                <Upload className="h-4 w-4 text-green-400" />
+              </Button>
+            </div>
             {profileData?.avatar_url && (
-              <button
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-8 w-8 bg-black/60 backdrop-blur-sm border-red-500/30 hover:bg-red-900/20 transition-colors duration-200"
                 onClick={removeAvatar}
                 disabled={uploading}
-                className="p-1.5 rounded-full bg-green-900/30 cursor-pointer hover:bg-green-900/50 transition-colors"
-                title="Remove photo"
               >
-                <Trash2 className="h-4 w-4 text-green-400" />
-              </button>
+                <Trash2 className="h-4 w-4 text-red-400" />
+              </Button>
             )}
           </div>
         </div>
-        <h2 className="text-xl font-bold text-green-400 mb-1">{getDisplayName()}</h2>
-        <p className="text-green-500/70 text-sm mb-4">Operator Level 1</p>
+        <div>
+          <h2 className="text-2xl font-bold text-green-400 mb-1">{profileData?.username || 'Operator'}</h2>
+          <p className="text-sm font-medium" style={{ color: currentRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
+                                                              currentRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
+                                                              currentRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400
+                                                              currentRank.level === 4 ? 'rgb(251, 191, 36)' : // amber-400
+                                                              currentRank.level === 5 ? 'rgb(251, 113, 133)' : // rose-400
+                                                              currentRank.level === 6 ? 'rgb(167, 139, 250)' : // violet-400
+                                                              'rgb(255, 255, 255)' // white for level 7
+          }}>{currentRank.title}</p>
+        </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-2xl font-bold text-green-400">0</div>
-            <div className="text-xs text-green-500/70">MISSIONS</div>
+      <div className="space-y-6">
+        <div className="grid grid-cols-3 gap-6 text-center">
+          <div className="bg-black/40 rounded-lg p-3 border border-green-500/10">
+            <div className="text-2xl font-bold text-emerald-400">{missionCount}</div>
+            <div className="text-xs text-emerald-500/70 mt-1">MISSIONS</div>
           </div>
-          <div>
-            <div className="text-2xl font-bold text-green-400">0</div>
-            <div className="text-xs text-green-500/70">XP</div>
+          <div className="bg-black/40 rounded-lg p-3 border border-green-500/10">
+            <XPDisplay xp={userXP.total_xp} />
+            <div className="text-xs text-emerald-500/70 mt-1">XP</div>
           </div>
-          <div>
-            <div className="text-2xl font-bold text-green-400">1</div>
-            <div className="text-xs text-green-500/70">RANK</div>
+          <div className="bg-black/40 rounded-lg p-3 border border-green-500/10">
+            <div className="text-2xl font-bold" style={{ color: currentRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
+                                                                 currentRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
+                                                                 currentRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400
+                                                                 currentRank.level === 4 ? 'rgb(251, 191, 36)' : // amber-400
+                                                                 currentRank.level === 5 ? 'rgb(251, 113, 133)' : // rose-400
+                                                                 currentRank.level === 6 ? 'rgb(167, 139, 250)' : // violet-400
+                                                                 'rgb(255, 255, 255)' // white for level 7
+            }}>{currentRank.level}</div>
+            <div className="text-xs text-emerald-500/70 mt-1">RANK</div>
           </div>
         </div>
 
-        <div className="space-y-3 text-sm text-green-500/70">
+        <div className="space-y-2 bg-black/40 rounded-lg p-4 border border-green-500/10">
+          <div className="flex justify-between text-xs mb-3">
+            <span className="font-medium" style={{ color: currentRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
+                                                         currentRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
+                                                         currentRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400
+                                                         currentRank.level === 4 ? 'rgb(251, 191, 36)' : // amber-400
+                                                         currentRank.level === 5 ? 'rgb(251, 113, 133)' : // rose-400
+                                                         currentRank.level === 6 ? 'rgb(167, 139, 250)' : // violet-400
+                                                         'rgb(255, 255, 255)' // white for level 7
+            }}>{currentRank.title}</span>
+            <span className="text-emerald-400">
+              {formatXP(userXP.total_xp - currentRank.min_xp)} / {formatXP(currentRank.max_xp - currentRank.min_xp)} XP
+            </span>
+          </div>
+          <div className="relative h-2 bg-green-900/20 rounded-full overflow-hidden">
+            <div 
+              className="absolute top-0 left-0 h-full bg-gradient-to-r from-green-500/50 to-green-400 transition-all duration-500"
+              style={{ width: `${progressToNextRank}%` }}
+            />
+          </div>
+          {nextRank && (
+            <div className="text-xs text-right mt-2">
+              <span className="text-emerald-400/70">Next: </span>
+              <span style={{ color: nextRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
+                                   nextRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
+                                   nextRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400
+                                   nextRank.level === 4 ? 'rgb(251, 191, 36)' : // amber-400
+                                   nextRank.level === 5 ? 'rgb(251, 113, 133)' : // rose-400
+                                   nextRank.level === 6 ? 'rgb(167, 139, 250)' : // violet-400
+                                   'rgb(255, 255, 255)' // white for level 7
+              }}>{nextRank.title}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 text-sm text-emerald-500/70 bg-black/40 rounded-lg p-4 border border-green-500/10">
           <div className="flex items-center">
             <Mail className="h-4 w-4 mr-2" />
             {user.email}
@@ -308,16 +561,16 @@ export const UserProfile = () => {
             Novice Operator
           </div>
         </div>
-
+        
         <Button
-          onClick={handleSignOut}
           variant="outline"
-          className="w-full border-green-500/30 text-green-400 hover:bg-green-900/20"
+          className="w-full justify-start text-red-400 hover:text-red-300 hover:bg-red-950/20 border-red-500/30 transition-colors duration-200"
+          onClick={handleSignOut}
         >
-          <LogOut className="h-4 w-4 mr-2" />
+          <LogOut className="mr-2 h-4 w-4" />
           Terminate Session
         </Button>
       </div>
     </div>
-  )
-}
+  );
+};

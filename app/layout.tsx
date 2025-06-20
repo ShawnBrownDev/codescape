@@ -3,8 +3,13 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { MatrixBackground } from '@/components/MatrixBackground';
+import { Toaster } from '@/components/ui/toaster';
+import { initializeRanks } from '@/lib/supabase';
 
 const inter = Inter({ subsets: ['latin'] });
+
+// Initialize ranks table
+initializeRanks().catch(console.error);
 
 export const metadata: Metadata = {
   title: 'Escape Room Master - Ultimate Puzzle Adventure',
@@ -32,8 +37,9 @@ export default function RootLayout({
               width: '100%',
             }}
           >
-            {children}
+          {children}
           </main>
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

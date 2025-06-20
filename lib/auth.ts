@@ -63,14 +63,24 @@ export const auth = {
 
   // Sign in with GitHub
   signInWithGitHub: async () => {
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID
+    if (!clientId) {
+      return { 
+        data: null, 
+        error: { message: 'GitHub client ID is not configured' }
+      }
+    }
+
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'github',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
         queryParams: {
           access_type: 'offline',
-          prompt: 'consent'
-        }
+          prompt: 'consent',
+          client_id: clientId
+        },
+        skipBrowserRedirect: false
       }
     })
     return { data, error }

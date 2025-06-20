@@ -2,16 +2,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogOut, User, Mail, Calendar, Trophy, Clock, Target, Shield, Zap, Terminal } from 'lucide-react'
+import { LogOut, Mail, Calendar, Terminal, Shield, Upload, Trash2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { useToast } from '@/hooks/use-toast'
 
 interface UserProfileData {
-  first_name: string
-  last_name: string
-  email: string
+  username: string
+  avatar_url: string | null
   created_at: string
 }
 
@@ -19,15 +18,16 @@ export const UserProfile = () => {
   const { user, signOut } = useAuth()
   const [profileData, setProfileData] = useState<UserProfileData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const { toast } = useToast()
 
   const fetchUserProfile = useCallback(async () => {
     if (!user?.id) return;
     
     try {
-      // First try to fetch the existing profile
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('first_name, last_name, email, created_at')
+        .select('username, avatar_url, created_at')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -43,9 +43,7 @@ export const UserProfile = () => {
         const { data: newProfile, error: createError } = await supabase
           .rpc('create_user_profile', {
             user_id: user.id,
-            user_email: user.email || '',
-            first_name: user.user_metadata?.first_name || null,
-            last_name: user.user_metadata?.last_name || null
+            user_email: user.email || ''
           });
 
         if (createError) {
@@ -72,117 +70,254 @@ export const UserProfile = () => {
   }
 
   const getDisplayName = () => {
-    // First try to get name from profile data
-    if (profileData) {
-      return `${profileData.first_name} ${profileData.last_name}`.trim()
-    }
-    
-    // Then try to get from GitHub metadata
-    if (user?.app_metadata?.provider === 'github') {
-      // Get the username part from the email (before the @)
-      const emailUsername = user?.email?.split('@')[0] || '';
-      // Remove any development/gmail parts if they exist
-      return emailUsername.replace('development', '').replace('gmail', '').replace('.com', '').trim();
-    }
-    
-    // Finally fall back to email username or default
-    return user?.email?.split('@')[0] || 'Operator'
+    return profileData?.username || user?.email?.split('@')[0] || 'Operator';
   }
 
-  const getInitials = (firstName: string, lastName: string) => {
-    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+  const getInitials = () => {
+    const displayName = getDisplayName();
+    const parts = displayName.split(' ');
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return displayName.substring(0, 2).toUpperCase();
   }
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
-      month: 'long',
-      day: 'numeric'
+      month: 'long'
     })
   }
+
+  const uploadAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      setUploading(true)
+      
+      if (!event.target.files || event.target.files.length === 0) {
+        throw new Error('You must select an image to upload.')
+      }
+
+      const file = event.target.files[0]
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || ''
+      const allowedTypes = ['jpg', 'jpeg', 'png', 'gif']
+      
+      if (!allowedTypes.includes(fileExt)) {
+        throw new Error('File type not supported. Please upload a JPG, PNG, or GIF image.')
+      }
+
+      const maxSize = 5 * 1024 * 1024 // 5MB
+      if (file.size > maxSize) {
+        throw new Error('File size too large. Please upload an image smaller than 5MB.')
+      }
+
+      // Create a folder with the user's ID and store the file there
+      const filePath = `${user?.id}/${Math.random()}.${fileExt}`
+
+      // Upload the file to Supabase storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        })
+
+      if (uploadError) {
+        throw uploadError
+      }
+
+      // Get the public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      // Update the user profile with the new avatar URL
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user?.id)
+
+      if (updateError) {
+        throw updateError
+      }
+
+      // Update local state
+      setProfileData(prev => prev ? { ...prev, avatar_url: publicUrl } : null)
+
+      toast({
+        title: "Success!",
+        description: "Your profile photo has been updated.",
+        variant: "default",
+      })
+
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to upload avatar",
+        variant: "destructive",
+      })
+      console.error('Error uploading avatar:', error)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const removeAvatar = async () => {
+    try {
+      if (!user?.id || !profileData?.avatar_url) return;
+
+      setUploading(true);
+
+      // Get the file path from the URL
+      const url = new URL(profileData.avatar_url);
+      const filePath = url.pathname.split('/avatars/')[1];
+
+      if (!filePath) {
+        throw new Error('Invalid avatar URL');
+      }
+
+      // Delete the file from storage
+      const { error: deleteStorageError } = await supabase.storage
+        .from('avatars')
+        .remove([filePath]);
+
+      if (deleteStorageError) {
+        throw deleteStorageError;
+      }
+
+      // Update the user profile to remove the avatar_url
+      const { error: updateError } = await supabase
+        .from('user_profiles')
+        .update({ avatar_url: null })
+        .eq('id', user.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Update local state
+      setProfileData(prev => prev ? { ...prev, avatar_url: null } : null);
+
+      toast({
+        title: "Success!",
+        description: "Your profile photo has been removed.",
+        variant: "default",
+      });
+
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to remove avatar",
+        variant: "destructive",
+      });
+      console.error('Error removing avatar:', error);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   if (!user) return null
 
   if (loading) {
     return (
-      <Card className="backdrop-blur-lg bg-black/40 border-green-500/20 shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-        <CardContent className="p-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-20 w-20 bg-green-900/30 rounded-full mx-auto"></div>
-            <div className="h-4 bg-green-900/30 rounded w-3/4 mx-auto"></div>
-            <div className="h-4 bg-green-900/30 rounded w-1/2 mx-auto"></div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-20 w-20 bg-green-900/30 rounded-full mx-auto"></div>
+          <div className="h-4 bg-green-900/30 rounded w-3/4 mx-auto"></div>
+          <div className="h-4 bg-green-900/30 rounded w-1/2 mx-auto"></div>
+        </div>
+      </div>
     )
   }
 
   return (
-    <Card className="backdrop-blur-lg bg-black/40 border-green-500/20 shadow-[0_0_15px_rgba(0,255,0,0.1)] overflow-hidden">
-      <CardContent className="p-6">
-        {/* Profile Header */}
-        <div className="flex items-center space-x-4 mb-6">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-full bg-green-500/10 border-2 border-green-500/30 flex items-center justify-center">
-              <User className="h-8 w-8 text-green-400" />
-            </div>
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-green-500 border-2 border-black flex items-center justify-center">
-              <span className="text-xs text-black font-bold">1</span>
-            </div>
+    <div className="p-6 space-y-6">
+      <div className="flex flex-col items-center text-center">
+        <div className="relative">
+          <Avatar className="h-24 w-24 mb-4">
+            {profileData?.avatar_url ? (
+              <AvatarImage src={profileData.avatar_url} />
+            ) : (
+              <AvatarFallback className="bg-green-900/30 text-green-400 text-xl">
+                {getInitials()}
+              </AvatarFallback>
+            )}
+          </Avatar>
+          <div className="absolute -bottom-2 right-0 flex gap-2">
+            <label 
+              htmlFor="avatar-upload" 
+              className="p-1.5 rounded-full bg-green-900/30 cursor-pointer hover:bg-green-900/50 transition-colors"
+              title="Upload photo"
+            >
+              <Upload className="h-4 w-4 text-green-400" />
+              <input
+                id="avatar-upload"
+                type="file"
+                accept="image/*"
+                onChange={uploadAvatar}
+                disabled={uploading}
+                className="hidden"
+              />
+            </label>
+            {profileData?.avatar_url && (
+              <button
+                onClick={removeAvatar}
+                disabled={uploading}
+                className="p-1.5 rounded-full bg-green-900/30 cursor-pointer hover:bg-green-900/50 transition-colors"
+                title="Remove photo"
+              >
+                <Trash2 className="h-4 w-4 text-green-400" />
+              </button>
+            )}
+          </div>
+        </div>
+        <h2 className="text-xl font-bold text-green-400 mb-1">{getDisplayName()}</h2>
+        <p className="text-green-500/70 text-sm mb-4">Operator Level 1</p>
+      </div>
+
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <div className="text-2xl font-bold text-green-400">0</div>
+            <div className="text-xs text-green-500/70">MISSIONS</div>
           </div>
           <div>
-            <h2 className="text-xl font-mono text-green-400">{getDisplayName()}</h2>
-            <p className="text-sm font-mono text-green-500/70">Operator Level 1</p>
-            <p className="text-xs font-mono text-green-500/50">{user?.email}</p>
+            <div className="text-2xl font-bold text-green-400">0</div>
+            <div className="text-xs text-green-500/70">XP</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-green-400">1</div>
+            <div className="text-xs text-green-500/70">RANK</div>
           </div>
         </div>
 
-        {/* User Stats */}
-        <div className="grid grid-cols-3 gap-2 mb-6">
-          <div className="text-center p-2 rounded-lg bg-green-500/5 border border-green-500/20">
-            <div className="text-lg font-mono text-green-400">0</div>
-            <div className="text-xs font-mono text-green-500/70">MISSIONS</div>
+        <div className="space-y-3 text-sm text-green-500/70">
+          <div className="flex items-center">
+            <Mail className="h-4 w-4 mr-2" />
+            {user.email}
           </div>
-          <div className="text-center p-2 rounded-lg bg-green-500/5 border border-green-500/20">
-            <div className="text-lg font-mono text-green-400">0</div>
-            <div className="text-xs font-mono text-green-500/70">XP</div>
+          <div className="flex items-center">
+            <Calendar className="h-4 w-4 mr-2" />
+            Joined {formatDate(profileData?.created_at || user.created_at)}
           </div>
-          <div className="text-center p-2 rounded-lg bg-green-500/5 border border-green-500/20">
-            <div className="text-lg font-mono text-green-400">1</div>
-            <div className="text-xs font-mono text-green-500/70">RANK</div>
+          <div className="flex items-center">
+            <Terminal className="h-4 w-4 mr-2" />
+            Basic Training
           </div>
-        </div>
-
-        {/* User Details */}
-        <div className="space-y-3 mb-6">
-          <div className="flex items-center space-x-3 text-sm font-mono">
-            <Mail className="h-4 w-4 text-green-500/70" />
-            <span className="text-green-400">{user.email}</span>
-          </div>
-          <div className="flex items-center space-x-3 text-sm font-mono">
-            <Calendar className="h-4 w-4 text-green-500/70" />
-            <span className="text-green-400">Joined June 2023</span>
-          </div>
-          <div className="flex items-center space-x-3 text-sm font-mono">
-            <Terminal className="h-4 w-4 text-green-500/70" />
-            <span className="text-green-400">Basic Training</span>
-          </div>
-          <div className="flex items-center space-x-3 text-sm font-mono">
-            <Trophy className="h-4 w-4 text-green-500/70" />
-            <span className="text-green-400">Novice Operator</span>
+          <div className="flex items-center">
+            <Shield className="h-4 w-4 mr-2" />
+            Novice Operator
           </div>
         </div>
 
-        {/* Action Button */}
         <Button
           onClick={handleSignOut}
           variant="outline"
-          className="w-full font-mono border-green-500/30 text-green-400 hover:bg-green-500/10"
+          className="w-full border-green-500/30 text-green-400 hover:bg-green-900/20"
         >
           <LogOut className="h-4 w-4 mr-2" />
           Terminate Session
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

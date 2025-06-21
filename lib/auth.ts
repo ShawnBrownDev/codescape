@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type { User } from '@supabase/supabase-js'
+import { initializeRanks } from './supabase'
 
 export type AuthUser = User | null
 
@@ -77,7 +78,6 @@ export const auth = {
   // Sign in with email and password
   signIn: async (email: string, password: string) => {
     try {
-      console.log('Attempting sign in for email:', email);
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -90,6 +90,75 @@ export const auth = {
           name: error.name
         });
         return { data: null, error };
+      }
+
+      // After successful sign in, ensure profile exists
+      if (data.user) {
+        try {
+          // Check if profile exists
+          const { data: profileData, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (profileError) {
+            console.error('Error checking profile:', profileError);
+          } else if (!profileData) {
+            // Create profile if it doesn't exist
+            const { error: createError } = await supabase.rpc('create_user_profile', {
+              user_id: data.user.id,
+              user_email: data.user.email || '',
+              first_name: data.user.user_metadata?.first_name || null,
+              last_name: data.user.user_metadata?.last_name || null,
+              username: data.user.user_metadata?.user_name || data.user.user_metadata?.preferred_username,
+              avatar_url: data.user.user_metadata?.avatar_url
+            });
+
+            if (createError) {
+              console.error('Error creating profile:', createError);
+            }
+          }
+
+          // Check if XP record exists
+          const { data: xpData, error: xpError } = await supabase
+            .from('user_xp')
+            .select('*')
+            .eq('user_id', data.user.id)
+            .maybeSingle();
+
+          if (xpError) {
+            console.error('Error checking XP:', xpError);
+          } else if (!xpData) {
+            // Create XP record if it doesn't exist
+            const { error: createXpError } = await supabase
+              .from('user_xp')
+              .insert({
+                user_id: data.user.id,
+                total_xp: 0,
+                current_level: 1,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+
+            if (createXpError) {
+              console.error('Error creating XP record:', createXpError);
+            }
+          }
+
+          // Initialize ranks if needed
+          const { data: ranksData, error: ranksError } = await supabase
+            .from('ranks')
+            .select('count');
+
+          if (ranksError) {
+            console.error('Error checking ranks:', ranksError);
+          } else if (!ranksData || ranksData.length === 0) {
+            await initializeRanks();
+          }
+        } catch (err) {
+          console.error('Error in profile initialization:', err);
+        }
       }
 
       return { data, error }

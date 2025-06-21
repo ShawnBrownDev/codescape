@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { LogOut, Mail, Calendar, Terminal, Shield, Upload, Trash2 } from 'lucide-react'
+import { LogOut, Mail, Calendar, Terminal, Shield, Upload, Trash2, Loader2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { initializeRanks } from '@/lib/supabase'
 import { useToast } from '@/hooks/use-toast'
 import { calculateRankFromDB, calculateProgress, formatXP, type RankInfo, fetchRanks } from '@/lib/utils'
 import { Progress } from '@/components/ui/progress'
@@ -31,7 +32,7 @@ interface UserMissions {
 export const UserProfile = () => {
   const { user, signOut } = useAuth()
   const [profileData, setProfileData] = useState<UserProfileData | null>(null)
-  const [userXP, setUserXP] = useState<UserXP>({ total_xp: 0, current_level: 1 })
+  const [userXP, setUserXP] = useState<UserXP | null>(null)
   const [missionCount, setMissionCount] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [currentRank, setCurrentRank] = useState<RankInfo | null>(null)
@@ -65,18 +66,21 @@ export const UserProfile = () => {
   }, [])
 
   const animateXPChange = useCallback((startXP: number, endXP: number) => {
-    const duration = 1000 // 1 second animation
     const startTime = performance.now()
+    const duration = 1000 // Animation duration in milliseconds
     
     const animate = (currentTime: number) => {
       const elapsed = currentTime - startTime
       const progress = Math.min(elapsed / duration, 1)
+      const currentXP = Math.floor(startXP + (endXP - startXP) * progress)
       
-      // Easing function for smooth animation
-      const easeOutQuart = 1 - Math.pow(1 - progress, 4)
-      const currentXP = Math.floor(startXP + (endXP - startXP) * easeOutQuart)
-      
-      setUserXP(prev => ({ ...prev, total_xp: currentXP }))
+      setUserXP(prev => prev ? {
+        ...prev,
+        total_xp: currentXP
+      } : {
+        total_xp: currentXP,
+        current_level: 1
+      })
       
       if (progress < 1) {
         animationFrameRef.current = requestAnimationFrame(animate)
@@ -91,6 +95,8 @@ export const UserProfile = () => {
   const updateRankInfo = useCallback(async (xp: number, animate: boolean = false) => {
     try {
       const ranks = await fetchRanks();
+      if (!ranks.length) return; // Return early if no ranks available
+
       const currentRankInfo = ranks.find(rank => xp >= rank.min_xp && xp <= rank.max_xp);
       if (!currentRankInfo) return;
 
@@ -101,7 +107,13 @@ export const UserProfile = () => {
         setIsUpdating(true)
         animateXPChange(previousXPRef.current, xp)
       } else {
-        setUserXP(prev => ({ ...prev, total_xp: xp }))
+        setUserXP(prev => prev ? {
+          ...prev,
+          total_xp: xp
+        } : {
+          total_xp: xp,
+          current_level: currentRankInfo.level
+        })
       }
       
       previousXPRef.current = xp
@@ -126,20 +138,86 @@ export const UserProfile = () => {
   }, [currentRank, toast, animateXPChange])
 
   const fetchUserProfile = useCallback(async () => {
-    if (!user?.id || !isMounted.current) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     
     try {
-      // Fetch profile data
+      // First verify we have an active session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        setLoading(false);
+        return; // Just return silently if no session
+      }
+
+      // Now fetch profile data
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('username, avatar_url, created_at')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error('Profile fetch error:', profileError);
+        if (profileError.code === 'PGRST116') { // Not found
+          setLoading(false);
+          return;
+        }
+        throw profileError;
+      }
 
-      // Only proceed if still mounted and user exists
-      if (!isMounted.current || !user) return;
+      // If no profile data exists, create it
+      if (!profileData) {
+        // Generate base username
+        let baseUsername = user.user_metadata?.user_name || 
+                         user.user_metadata?.preferred_username || 
+                         user.email?.split('@')[0] || 
+                         'Operator';
+        
+        let username = baseUsername;
+        let attempt = 1;
+        let profileCreated = false;
+        
+        // Try to create profile with increasingly numbered usernames until success
+        while (!profileCreated && attempt <= 10) {
+          try {
+            const { data: newProfileData, error: createProfileError } = await supabase
+              .from('user_profiles')
+              .insert({
+                id: user.id,
+                username: username,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .select('username, avatar_url, created_at')
+              .single();
+
+            if (!createProfileError) {
+              setProfileData(newProfileData);
+              profileCreated = true;
+            } else if (createProfileError.code === '23505') { // Unique constraint violation
+              // Try next username
+              username = `${baseUsername}${attempt}`;
+              attempt++;
+            } else {
+              throw createProfileError;
+            }
+          } catch (error) {
+            if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+              // Continue the loop for duplicate username
+              continue;
+            }
+            throw error;
+          }
+        }
+
+        if (!profileCreated) {
+          throw new Error('Failed to create profile after multiple attempts');
+        }
+      } else {
+        setProfileData(profileData);
+      }
 
       // Fetch XP data
       const { data: xpData, error: xpError } = await supabase
@@ -148,14 +226,14 @@ export const UserProfile = () => {
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (xpError) throw xpError;
-
-      // Only proceed if still mounted and user exists
-      if (!isMounted.current || !user) return;
+      if (xpError && xpError.code !== 'PGRST116') {
+        console.error('XP fetch error:', xpError);
+        throw xpError;
+      }
 
       // If no XP record exists, create one
       if (!xpData) {
-        const { data: newXpData, error: createError } = await supabase
+        const { data: newXpData, error: createXpError } = await supabase
           .from('user_xp')
           .insert({
             user_id: user.id,
@@ -167,22 +245,17 @@ export const UserProfile = () => {
           .select('total_xp, current_level')
           .single();
 
-        if (createError) throw createError;
-
-        // Only proceed if still mounted and user exists
-        if (!isMounted.current || !user) return;
-
-        if (newXpData) {
-          setUserXP(newXpData);
-          await updateRankInfo(newXpData.total_xp);
+        if (createXpError) {
+          console.error('Error creating XP record:', createXpError);
+          throw createXpError;
         }
+
+        setUserXP(newXpData);
+        await updateRankInfo(newXpData.total_xp);
       } else {
         setUserXP(xpData);
         await updateRankInfo(xpData.total_xp);
       }
-
-      // Only proceed if still mounted and user exists
-      if (!isMounted.current || !user) return;
 
       // Fetch completed missions count
       const { count: missionsCount, error: missionsError } = await supabase
@@ -191,27 +264,37 @@ export const UserProfile = () => {
         .eq('user_id', user.id)
         .eq('completed', true);
 
-      if (missionsError) throw missionsError;
-
-      // Only proceed if still mounted and user exists
-      if (!isMounted.current || !user) return;
-
-      if (profileData) {
-        setProfileData(profileData);
+      if (missionsError) {
+        console.error('Missions count error:', missionsError);
+        throw missionsError;
       }
 
       setMissionCount(missionsCount || 0);
+      setLoading(false);
 
     } catch (error) {
-      console.error('Error fetching user data:', error);
-    } finally {
-      if (isMounted.current) {
-        setLoading(false);
+      console.error('Error in fetchUserProfile:', error);
+      toast({
+        title: "Error",
+        description: error && typeof error === 'object' && 'message' in error
+          ? String(error.message)
+          : "Failed to load profile data. Please refresh the page.",
+        variant: "destructive",
+      });
+
+      // If we get an authentication error, redirect to sign in
+      if (error && typeof error === 'object' && 'message' in error && 
+          typeof error.message === 'string' &&
+          (error.message.includes('sign in') || error.message.includes('authentication'))) {
+        router.push('/auth/error');
       }
     }
-  }, [user, updateRankInfo]);
+  }, [user, updateRankInfo, toast, router]);
 
   useEffect(() => {
+    // Set isMounted to true when the component mounts
+    isMounted.current = true;
+    
     if (user) {
       cleanup(); // Clean up existing subscriptions
       fetchUserProfile();
@@ -260,12 +343,22 @@ export const UserProfile = () => {
           }
         })
         .subscribe()
+    } else {
+      // Reset state when user is not available
+      setProfileData(null);
+      setUserXP(null);
+      setCurrentRank(null);
+      setNextRank(null);
+      setProgressToNextRank(0);
+      setMissionCount(0);
+      setLoading(false);
     }
 
+    // Cleanup function
     return () => {
       isMounted.current = false;
       cleanup();
-    }
+    };
   }, [user, fetchUserProfile, cleanup]);
 
   const handleSignOut = async () => {
@@ -358,12 +451,13 @@ export const UserProfile = () => {
         throw new Error('File size too large. Please upload an image smaller than 5MB.')
       }
 
-      // Create a folder with the user's ID and store the file there
-      const filePath = `${user?.id}/${Math.random()}.${fileExt}`
+      // Create a unique file path under the user's folder
+      const fileName = `${Math.random().toString(36).slice(2)}.${fileExt}`
+      const filePath = `${user?.id}/${fileName}`
 
       // Upload the file to Supabase storage
       const { error: uploadError } = await supabase.storage
-        .from('avatars')
+        .from('profile-avatars')
         .upload(filePath, file, {
           cacheControl: '3600',
           upsert: true
@@ -375,17 +469,40 @@ export const UserProfile = () => {
 
       // Get the public URL
       const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
+        .from('profile-avatars')
         .getPublicUrl(filePath)
 
       // Update the user profile with the new avatar URL
       const { error: updateError } = await supabase
         .from('user_profiles')
-        .update({ avatar_url: publicUrl })
+        .update({ 
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', user?.id)
 
       if (updateError) {
+        // If profile update fails, try to delete the uploaded image
+        await supabase.storage
+          .from('profile-avatars')
+          .remove([filePath])
         throw updateError
+      }
+
+      // If there was a previous avatar, try to remove it
+      if (profileData?.avatar_url) {
+        try {
+          const oldUrl = new URL(profileData.avatar_url)
+          const oldPath = oldUrl.pathname.split('/profile-avatars/')[1]
+          if (oldPath && oldPath !== filePath) {
+            await supabase.storage
+              .from('profile-avatars')
+              .remove([oldPath])
+          }
+        } catch (error) {
+          console.error('Error removing old avatar:', error)
+          // Don't throw here as the new avatar was uploaded successfully
+        }
       }
 
       // Update local state
@@ -395,15 +512,18 @@ export const UserProfile = () => {
         title: "Success!",
         description: "Your profile photo has been updated.",
         variant: "default",
+        className: "bg-green-950 border-green-500 text-green-400",
       })
 
     } catch (error) {
+      console.error('Error uploading avatar:', error)
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to upload avatar",
+        description: error instanceof Error ? error.message : 
+                    error && typeof error === 'object' && 'message' in error ? String(error.message) :
+                    "Failed to upload avatar. Please try again.",
         variant: "destructive",
       })
-      console.error('Error uploading avatar:', error)
     } finally {
       setUploading(false)
     }
@@ -417,7 +537,7 @@ export const UserProfile = () => {
 
       // Get the file path from the URL
       const url = new URL(profileData.avatar_url);
-      const filePath = url.pathname.split('/avatars/')[1];
+      const filePath = url.pathname.split('/profile-avatars/')[1];
 
       if (!filePath) {
         throw new Error('Invalid avatar URL');
@@ -425,7 +545,7 @@ export const UserProfile = () => {
 
       // Delete the file from storage
       const { error: deleteStorageError } = await supabase.storage
-        .from('avatars')
+        .from('profile-avatars')
         .remove([filePath]);
 
       if (deleteStorageError) {
@@ -435,7 +555,10 @@ export const UserProfile = () => {
       // Update the user profile to remove the avatar_url
       const { error: updateError } = await supabase
         .from('user_profiles')
-        .update({ avatar_url: null })
+        .update({ 
+          avatar_url: null,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', user.id);
 
       if (updateError) {
@@ -449,15 +572,18 @@ export const UserProfile = () => {
         title: "Success!",
         description: "Your profile photo has been removed.",
         variant: "default",
+        className: "bg-green-950 border-green-500 text-green-400",
       });
 
     } catch (error) {
+      console.error('Error removing avatar:', error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to remove avatar",
+        description: error instanceof Error ? error.message : 
+                    error && typeof error === 'object' && 'message' in error ? String(error.message) :
+                    "Failed to remove avatar. Please try again.",
         variant: "destructive",
       });
-      console.error('Error removing avatar:', error);
     } finally {
       setUploading(false);
     }
@@ -473,18 +599,30 @@ export const UserProfile = () => {
     </div>
   )
 
-  if (!user || !currentRank) return null
+  if (!user) {
+    return null;
+  }
 
   if (loading) {
     return (
       <div className="p-6">
-          <div className="animate-pulse space-y-4">
+        <div className="animate-pulse space-y-4">
           <div className="h-20 w-20 bg-green-900/30 rounded-full mx-auto"></div>
           <div className="h-4 bg-green-900/30 rounded w-3/4 mx-auto"></div>
           <div className="h-4 bg-green-900/30 rounded w-1/2 mx-auto"></div>
         </div>
-          </div>
-    )
+      </div>
+    );
+  }
+
+  if (!currentRank) {
+    return (
+      <div className="p-6">
+        <div className="text-center text-green-400">
+          Initializing profile data...
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -493,49 +631,58 @@ export const UserProfile = () => {
         <div className="relative group">
           <Avatar className="h-24 w-24 ring-2 ring-green-500/20 ring-offset-2 ring-offset-black transition-all duration-300 group-hover:ring-green-500/40">
             <AvatarImage src={getAvatarUrl()} />
-            <AvatarFallback className="bg-green-900/20 text-green-400">{getInitials()}</AvatarFallback>
+            <AvatarFallback className="bg-green-950/50 text-green-500">
+              {getInitials()}
+            </AvatarFallback>
           </Avatar>
-          <div className="absolute -bottom-2 -right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+
+          {/* Avatar Upload Controls */}
+          <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 flex gap-2">
             <div className="relative">
-              <input
-                type="file"
-                accept="image/*"
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                onChange={uploadAvatar}
-                disabled={uploading}
-              />
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-8 w-8 bg-black/60 backdrop-blur-sm border-green-500/30 hover:bg-green-900/20 transition-colors duration-200"
+              <Button 
+                variant="outline" 
+                size="icon" 
+                className="h-8 w-8 rounded-full bg-black/80 border-green-500/50 hover:border-green-500"
                 disabled={uploading}
               >
-                <Upload className="h-4 w-4 text-green-400" />
+                <label className="cursor-pointer absolute inset-0 flex items-center justify-center">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={uploadAvatar}
+                    disabled={uploading}
+                  />
+                  <Upload className="h-4 w-4 text-green-500" />
+                </label>
               </Button>
             </div>
+
             {profileData?.avatar_url && (
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-8 w-8 bg-black/60 backdrop-blur-sm border-red-500/30 hover:bg-red-900/20 transition-colors duration-200"
+              <Button 
+                variant="outline" 
+                size="icon" 
+                className="h-8 w-8 rounded-full bg-black/80 border-red-500/50 hover:border-red-500"
                 onClick={removeAvatar}
                 disabled={uploading}
               >
-                <Trash2 className="h-4 w-4 text-red-400" />
+                <Trash2 className="h-4 w-4 text-red-500" />
               </Button>
             )}
           </div>
+
+          {uploading && (
+            <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center">
+              <Loader2 className="h-6 w-6 text-green-500 animate-spin" />
+            </div>
+          )}
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-green-400 mb-1">{getDisplayName()}</h2>
-          <p className="text-sm font-medium" style={{ color: currentRank.level === 1 ? 'rgb(52, 211, 153)' : // emerald-400
-                                                              currentRank.level === 2 ? 'rgb(34, 211, 238)' : // cyan-400
-                                                              currentRank.level === 3 ? 'rgb(232, 121, 249)' : // fuchsia-400
-                                                              currentRank.level === 4 ? 'rgb(251, 191, 36)' : // amber-400
-                                                              currentRank.level === 5 ? 'rgb(251, 113, 133)' : // rose-400
-                                                              currentRank.level === 6 ? 'rgb(167, 139, 250)' : // violet-400
-                                                              'rgb(255, 255, 255)' // white for level 7
-          }}>{currentRank.title}</p>
+
+        <div className="space-y-2">
+          <div className="text-2xl font-bold text-green-400">{getDisplayName()}</div>
+          <div className="text-sm text-green-500/70">
+            Joined {profileData?.created_at ? formatDate(profileData.created_at) : 'Recently'}
+          </div>
         </div>
       </div>
 
@@ -546,7 +693,7 @@ export const UserProfile = () => {
             <div className="text-xs text-emerald-500/70 mt-1">MISSIONS</div>
           </div>
           <div className="bg-black/40 rounded-lg p-3 border border-green-500/10">
-            <XPDisplay xp={userXP.total_xp} />
+            <XPDisplay xp={userXP?.total_xp || 0} />
             <div className="text-xs text-emerald-500/70 mt-1">XP</div>
           </div>
           <div className="bg-black/40 rounded-lg p-3 border border-green-500/10">
@@ -573,7 +720,7 @@ export const UserProfile = () => {
                                                          'rgb(255, 255, 255)' // white for level 7
             }}>{currentRank.title}</span>
             <span className="text-emerald-400">
-              {formatXP(userXP.total_xp - currentRank.min_xp)} / {formatXP(currentRank.max_xp - currentRank.min_xp)} XP
+              {formatXP(userXP?.total_xp ? userXP.total_xp - currentRank.min_xp : 0)} / {formatXP(currentRank.max_xp - currentRank.min_xp)} XP
             </span>
           </div>
           <div className="relative h-2 bg-green-900/20 rounded-full overflow-hidden">

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { auth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { z } from 'zod'
 
 interface AuthFormData {
   email: string
@@ -52,27 +53,15 @@ export function useAuthForm() {
     })
 
     try {
-      console.log('Starting sign in process...');
       const { data, error } = await auth.signIn(formData.email, formData.password)
       
       if (error) {
-        console.error('Sign in error:', error);
-        let errorMessage = error.message;
-        
-        // Handle specific error cases
-        if (error.message?.includes('Invalid login credentials')) {
-          errorMessage = 'Invalid email or password. Please try again.';
-        } else if (error.message?.includes('Email not confirmed')) {
-          errorMessage = 'Please verify your email address before signing in.';
-        }
-        
         setFormState({
           isLoading: false,
-          error: errorMessage,
+          error: error.message,
           success: null
         })
       } else if (data?.user) {
-        console.log('Sign in successful');
         setFormState({
           isLoading: false,
           error: null,
@@ -80,7 +69,6 @@ export function useAuthForm() {
         })
         router.push('/dashboard')
       } else {
-        console.error('No user data returned');
         setFormState({
           isLoading: false,
           error: 'Unable to sign in. Please try again.',
@@ -88,7 +76,6 @@ export function useAuthForm() {
         })
       }
     } catch (err) {
-      console.error('Unexpected error during sign in:', err);
       setFormState({
         isLoading: false,
         error: err instanceof Error ? err.message : 'An unexpected error occurred',

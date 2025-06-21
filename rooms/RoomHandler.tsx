@@ -105,7 +105,7 @@ function Rooms() {
             const newTotalXP = (xpData?.total_xp || 0) + xpToAdd
             const newLevel = Math.floor(newTotalXP / 1000) + 1 // Level up every 1000 XP
 
-            // Update XP and level
+            // Update XP and level using upsert with onConflict
             const { error: updateError } = await supabase
                 .from('user_xp')
                 .upsert({
@@ -113,9 +113,14 @@ function Rooms() {
                     total_xp: newTotalXP,
                     current_level: newLevel,
                     updated_at: new Date().toISOString()
+                }, {
+                    onConflict: 'user_id'
                 })
 
-            if (updateError) throw updateError
+            if (updateError) {
+                console.error('Error updating XP:', updateError)
+                throw updateError
+            }
 
             // Show XP gain toast
             toast({
@@ -126,49 +131,29 @@ function Rooms() {
 
         } catch (error) {
             console.error('Error awarding XP:', error)
+            toast({
+                title: "Error",
+                description: "Failed to award XP. Please try again.",
+                variant: "destructive",
+            })
         }
     }
 
-    function evaluateSolution(solution: string, expectedOutput: string): boolean {
+    const evaluateCode = async (code: string, expectedOutput: string) => {
         try {
-            // First try to extract the function name from the user's code
-            const userFuncMatch = solution.match(/function\s+(\w+)\s*\(/);
-            const userFuncName = userFuncMatch ? userFuncMatch[1] : null;
-
-            // If we can't find it in the user's code, fall back to the description
-            const descFuncMatch = puzzle?.description.match(/function\s+(\w+)\s*\(/);
-            const funcName = userFuncName || (descFuncMatch ? descFuncMatch[1] : 'solution');
-            
-            // Get the test input from the description
-            const testInputMatch = puzzle?.description.match(/result of \w+\(([^)]+)\)/);
-            let testInput = testInputMatch ? testInputMatch[1] : '"coding"';
-            
-            // If the input looks like an array, parse it
-            if (testInput.includes('[')) {
-                // Keep it as a string representation of an array
-                testInput = testInput.trim();
-            } else if (!testInput.includes('"')) {
-                // If it's not already a string literal and not an array, make it a string literal
-                testInput = `"${testInput.replace(/"/g, '')}"`;
-            }
-            
-            // Create a function from the user's code and immediately call it with the test input
             const fullCode = `
-                ${solution}
-                return ${funcName}(${testInput});
-            `
-            console.log('Evaluating code:', fullCode); // For debugging
-            const func = new Function(fullCode)
-            const result = func()
-            console.log('Result:', result, 'Expected:', expectedOutput); // For debugging
-            
-            // Convert both to strings for comparison
-            return String(result).replace(/\s/g, '') === expectedOutput.replace(/\s/g, '')
-        } catch (e) {
-            setMessage(`Error in your code: ${e}`)
-            return false
+                ${code}
+                ${expectedOutput}
+            `;
+
+            const result = await eval(fullCode);
+
+            return result === expectedOutput;
+        } catch (error) {
+            console.error('Code evaluation error:', error);
+            return false;
         }
-    }
+    };
 
     async function handleSubmit() {
         if (!puzzle) {
@@ -186,7 +171,7 @@ function Rooms() {
             return
         }
 
-        const isCorrect = evaluateSolution(userSolution, puzzle.expected_output)
+        const isCorrect = await evaluateCode(userSolution, puzzle.expected_output)
         if (isCorrect) {
             setMessage("Congratulations! You've solved the puzzle.")
             // Award XP before moving to next room

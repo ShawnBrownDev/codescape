@@ -1,11 +1,9 @@
 import { Button } from "@/components/ui/button"
-import { Github } from "lucide-react"
 
 interface AuthFormActionsProps {
   isLoading: boolean
   isSignUp: boolean
   onSubmit: (e: React.FormEvent) => Promise<void>
-  onGitHubSignIn: () => Promise<void>
   onToggleMode: () => void
 }
 
@@ -13,7 +11,6 @@ export function AuthFormActions({
   isLoading,
   isSignUp,
   onSubmit,
-  onGitHubSignIn,
   onToggleMode
 }: AuthFormActionsProps) {
   return (
@@ -32,26 +29,6 @@ export function AuthFormActions({
         ) : (
           isSignUp ? "Join the Resistance" : "Enter the Matrix"
         )}
-      </Button>
-
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t border-green-500/30" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-black px-2 text-green-500">or</span>
-        </div>
-      </div>
-
-      <Button
-        type="button"
-        variant="outline"
-        onClick={onGitHubSignIn}
-        disabled={isLoading}
-        className="border-green-500/30 hover:bg-green-900/20"
-      >
-        <Github className="mr-2 h-4 w-4" />
-        GitHub
       </Button>
 
       <Button

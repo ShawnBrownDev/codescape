@@ -400,14 +400,12 @@ export const UserProfile = () => {
   }
 
   const getDisplayName = () => {
-    // First try GitHub username from metadata
-    const githubUsername = user?.user_metadata?.user_name || user?.user_metadata?.preferred_username
-    // Then try profile username
+    // Try profile username
     const profileUsername = profileData?.username
     // Then try email username
     const emailUsername = user?.email?.split('@')[0]
     // Finally fallback to 'Operator'
-    return githubUsername || profileUsername || emailUsername || 'Operator'
+    return profileUsername || emailUsername || 'Operator'
   }
 
   const getInitials = () => {
@@ -416,11 +414,8 @@ export const UserProfile = () => {
   }
 
   const getAvatarUrl = () => {
-    // First try profile avatar
-    const profileAvatar = profileData?.avatar_url
-    // Then try GitHub avatar from metadata
-    const githubAvatar = user?.user_metadata?.avatar_url
-    return profileAvatar || githubAvatar || ''
+    // Use profile avatar
+    return profileData?.avatar_url || ''
   }
 
   const formatDate = (dateString: string) => {

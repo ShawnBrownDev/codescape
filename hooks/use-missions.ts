@@ -97,22 +97,30 @@ export function useMissions() {
         // Create initial XP record if it doesn't exist
         const { data: newXPData, error: createError } = await supabase
           .from('user_xp')
-          .insert([{
+          .upsert([{
             user_id: user.id,
             total_xp: 0,
             current_level: 1,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
-          }])
+          }], {
+            onConflict: 'user_id'
+          })
           .select()
           .single()
 
-        if (createError) {
+        if (createError && createError.code !== '23505') { // Ignore duplicate key errors
           console.error('Error creating initial XP record:', createError)
           return
         }
 
-        setUserXP(newXPData as UserXP)
+        setUserXP(newXPData as UserXP || {
+          user_id: user.id,
+          total_xp: 0,
+          current_level: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
       } else {
         setUserXP(userXPData as UserXP)
       }

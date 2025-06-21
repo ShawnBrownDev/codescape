@@ -86,14 +86,34 @@ export function useMissions() {
         .from('user_xp')
         .select('*')
         .eq('user_id', user.id)
-        .single()
+        .maybeSingle()
 
-      if (userXPError) {
+      if (userXPError && userXPError.code !== 'PGRST116') {
         console.error('Error fetching user XP:', userXPError)
         return
       }
 
-      if (userXPData) {
+      if (!userXPData) {
+        // Create initial XP record if it doesn't exist
+        const { data: newXPData, error: createError } = await supabase
+          .from('user_xp')
+          .insert([{
+            user_id: user.id,
+            total_xp: 0,
+            current_level: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }])
+          .select()
+          .single()
+
+        if (createError) {
+          console.error('Error creating initial XP record:', createError)
+          return
+        }
+
+        setUserXP(newXPData as UserXP)
+      } else {
         setUserXP(userXPData as UserXP)
       }
       setLoading(false)

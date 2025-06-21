@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { auth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { z } from 'zod'
 
 interface AuthFormData {
   email: string
@@ -53,24 +54,31 @@ export function useAuthForm() {
 
     try {
       const { data, error } = await auth.signIn(formData.email, formData.password)
+      
       if (error) {
         setFormState({
           isLoading: false,
           error: error.message,
           success: null
         })
-      } else if (data.user) {
+      } else if (data?.user) {
         setFormState({
           isLoading: false,
           error: null,
           success: 'Welcome back, escape artist!'
         })
-        router.push('/')
+        router.push('/dashboard')
+      } else {
+        setFormState({
+          isLoading: false,
+          error: 'Unable to sign in. Please try again.',
+          success: null
+        })
       }
     } catch (err) {
       setFormState({
         isLoading: false,
-        error: 'An unexpected error occurred',
+        error: err instanceof Error ? err.message : 'An unexpected error occurred',
         success: null
       })
     }

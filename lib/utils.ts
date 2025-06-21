@@ -15,18 +15,76 @@ export interface RankInfo {
   color: string;
 }
 
-export async function fetchRanks(): Promise<RankInfo[]> {
-  const { data, error } = await supabase
-    .from('ranks')
-    .select('*')
-    .order('level', { ascending: true });
+async function initializeRanks() {
+  const ranks = [
+    { level: 1, title: 'Initiate', min_xp: 0, max_xp: 999, color: '#34D399' },
+    { level: 2, title: 'Operator', min_xp: 1000, max_xp: 2499, color: '#22D3EE' },
+    { level: 3, title: 'Agent', min_xp: 2500, max_xp: 4999, color: '#E879F9' },
+    { level: 4, title: 'Sentinel', min_xp: 5000, max_xp: 9999, color: '#FBBF24' },
+    { level: 5, title: 'Architect', min_xp: 10000, max_xp: 19999, color: '#FB7185' },
+    { level: 6, title: 'Oracle', min_xp: 20000, max_xp: 49999, color: '#A78BFA' },
+    { level: 7, title: 'The One', min_xp: 50000, max_xp: 999999, color: '#FFFFFF' }
+  ];
 
-  if (error) {
-    console.error('Error fetching ranks:', error);
-    return [];
+  for (const rank of ranks) {
+    const { error } = await supabase
+      .from('ranks')
+      .insert(rank)
+      .select()
+      .single();
+
+    if (error && error.code !== '23505') { // Ignore unique constraint violations
+      console.error('Error initializing rank:', error);
+      throw error;
+    }
   }
+}
 
-  return data || [];
+export async function fetchRanks(): Promise<RankInfo[]> {
+  try {
+    // First check if user is authenticated
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    if (authError || !session) {
+      return []; // Return empty array if no session instead of throwing
+    }
+
+    const { data, error } = await supabase
+      .from('ranks')
+      .select('*')
+      .order('level', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching ranks:', error);
+      return []; // Return empty array on error
+    }
+
+    if (!data || data.length === 0) {
+      // Try to initialize ranks using RPC
+      const { error: createError } = await supabase.rpc('create_ranks_table');
+      if (createError) {
+        console.error('Error creating ranks table:', createError);
+        return []; // Return empty array if initialization fails
+      }
+
+      // Retry fetching ranks after initialization
+      const { data: retryData, error: retryError } = await supabase
+        .from('ranks')
+        .select('*')
+        .order('level', { ascending: true });
+
+      if (retryError || !retryData || retryData.length === 0) {
+        console.error('Error retrying rank fetch:', retryError);
+        return []; // Return empty array if retry fails
+      }
+
+      return retryData;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error in fetchRanks:', error);
+    return []; // Return empty array on any other error
+  }
 }
 
 export async function calculateRankFromDB(xp: number): Promise<RankInfo | null> {

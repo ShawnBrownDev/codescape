@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import type { User } from '@supabase/supabase-js'
+import { initializeRanks } from './supabase'
 
 export type AuthUser = User | null
 
@@ -36,12 +37,31 @@ export const auth = {
             user_id: data.user.id,
             user_email: email,
             first_name: metadata.first_name.trim(),
-            last_name: metadata.last_name.trim()
+            last_name: metadata.last_name.trim(),
+            username: null // Let the function generate it from first and last name
           });
 
         if (profileError) {
           console.error('Error creating user profile:', profileError);
           return { data: null, error: profileError };
+        }
+
+        // Initialize user XP record
+        const { error: xpError } = await supabase
+          .from('user_xp')
+          .upsert({
+            user_id: data.user.id,
+            total_xp: 0,
+            current_level: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'user_id'
+          });
+
+        if (xpError) {
+          console.error('Error initializing user XP:', xpError);
+          return { data: null, error: xpError };
         }
       }
 
@@ -57,11 +77,100 @@ export const auth = {
 
   // Sign in with email and password
   signIn: async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-    return { data, error }
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
+      
+      if (error) {
+        console.error('Sign in error details:', {
+          message: error.message,
+          status: error.status,
+          name: error.name
+        });
+        return { data: null, error };
+      }
+
+      // After successful sign in, ensure profile exists
+      if (data.user) {
+        try {
+          // Check if profile exists
+          const { data: profileData, error: profileError } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (profileError) {
+            console.error('Error checking profile:', profileError);
+          } else if (!profileData) {
+            // Create profile if it doesn't exist
+            const { error: createError } = await supabase.rpc('create_user_profile', {
+              user_id: data.user.id,
+              user_email: data.user.email || '',
+              first_name: data.user.user_metadata?.first_name || null,
+              last_name: data.user.user_metadata?.last_name || null,
+              username: data.user.user_metadata?.user_name || data.user.user_metadata?.preferred_username,
+              avatar_url: data.user.user_metadata?.avatar_url
+            });
+
+            if (createError) {
+              console.error('Error creating profile:', createError);
+            }
+          }
+
+          // Check if XP record exists
+          const { data: xpData, error: xpError } = await supabase
+            .from('user_xp')
+            .select('*')
+            .eq('user_id', data.user.id)
+            .maybeSingle();
+
+          if (xpError) {
+            console.error('Error checking XP:', xpError);
+          } else if (!xpData) {
+            // Create XP record if it doesn't exist
+            const { error: createXpError } = await supabase
+              .from('user_xp')
+              .insert({
+                user_id: data.user.id,
+                total_xp: 0,
+                current_level: 1,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+
+            if (createXpError) {
+              console.error('Error creating XP record:', createXpError);
+            }
+          }
+
+          // Initialize ranks if needed
+          const { data: ranksData, error: ranksError } = await supabase
+            .from('ranks')
+            .select('count');
+
+          if (ranksError) {
+            console.error('Error checking ranks:', ranksError);
+          } else if (!ranksData || ranksData.length === 0) {
+            await initializeRanks();
+          }
+        } catch (err) {
+          console.error('Error in profile initialization:', err);
+        }
+      }
+
+      return { data, error }
+    } catch (err) {
+      console.error('Unexpected sign in error:', err);
+      return { 
+        data: null, 
+        error: { 
+          message: err instanceof Error ? err.message : 'An unexpected error occurred during sign in'
+        } 
+      };
+    }
   },
 
   // Sign in with GitHub
@@ -85,10 +194,16 @@ export const auth = {
       
       if (user) {
         try {
+          // Extract first and last name from GitHub metadata
+          const fullName = user.user_metadata?.full_name || '';
+          const [firstName = '', lastName = ''] = fullName.split(' ');
+
           const { error: profileError } = await supabase
             .rpc('create_user_profile', {
               user_id: user.id,
               user_email: user.email || '',
+              first_name: firstName || null,
+              last_name: lastName || null,
               username: user.user_metadata?.user_name || user.user_metadata?.preferred_username,
               avatar_url: user.user_metadata?.avatar_url
             });
@@ -96,6 +211,24 @@ export const auth = {
           if (profileError) {
             console.error('Error creating GitHub user profile:', profileError);
             return { data: null, error: profileError };
+          }
+
+          // Initialize user XP record
+          const { error: xpError } = await supabase
+            .from('user_xp')
+            .upsert({
+              user_id: user.id,
+              total_xp: 0,
+              current_level: 1,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'user_id'
+            });
+
+          if (xpError) {
+            console.error('Error initializing user XP:', xpError);
+            return { data: null, error: xpError };
           }
         } catch (err) {
           console.error('Error in GitHub profile creation:', err);
@@ -137,11 +270,17 @@ export const auth = {
 
 export async function createUserProfile(user: User) {
   try {
+    // Extract first and last name from metadata
+    const firstName = user.user_metadata?.first_name;
+    const lastName = user.user_metadata?.last_name;
+    const fullName = user.user_metadata?.full_name;
+    let [firstNameFromFull = '', lastNameFromFull = ''] = (fullName || '').split(' ');
+
     const { error } = await supabase.rpc('create_user_profile', {
       user_id: user.id,
       user_email: user.email || '',
-      first_name: user.user_metadata?.first_name || null,
-      last_name: user.user_metadata?.last_name || null,
+      first_name: firstName || firstNameFromFull || null,
+      last_name: lastName || lastNameFromFull || null,
       username: user.user_metadata?.user_name || user.user_metadata?.preferred_username,
       avatar_url: user.user_metadata?.avatar_url
     });

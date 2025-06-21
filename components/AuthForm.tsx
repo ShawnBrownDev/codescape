@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Github, Mail, Loader2, Eye, EyeOff, Lock, User } from 'lucide-react'
+import { Mail, Loader2, Eye, EyeOff, Lock, User } from 'lucide-react'
 import { auth } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
 import { useAuthForm } from "@/hooks/use-auth-form"
@@ -24,7 +24,6 @@ export function AuthForm() {
     resetFormState,
     handleSignIn,
     handleSignUp,
-    handleGitHubSignIn
   } = useAuthForm()
 
   const toggleMode = () => {
@@ -72,8 +71,8 @@ export function AuthForm() {
           <AuthFormInput
             id="email"
             label="Email"
-                      type="email"
-                      value={formData.email}
+            type="email"
+            value={formData.email}
             onChange={(value) => updateFormData("email", value)}
             placeholder="neo@matrix.com"
             autoComplete="email"
@@ -83,7 +82,7 @@ export function AuthForm() {
             id="password"
             label="Password"
             type="password"
-                      value={formData.password}
+            value={formData.password}
             onChange={(value) => updateFormData("password", value)}
             placeholder="••••••••"
             autoComplete={isSignUp ? "new-password" : "current-password"}
@@ -92,17 +91,16 @@ export function AuthForm() {
           <AuthFormStatus
             error={formState.error}
             success={formState.success}
-                      />
+          />
 
           <AuthFormActions
             isLoading={formState.isLoading}
             isSignUp={isSignUp}
             onSubmit={isSignUp ? handleSignUp : handleSignIn}
-            onGitHubSignIn={handleGitHubSignIn}
             onToggleMode={toggleMode}
           />
-              </form>
-        </CardContent>
-      </Card>
+        </form>
+      </CardContent>
+    </Card>
   )
 }

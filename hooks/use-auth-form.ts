@@ -102,7 +102,7 @@ export function useAuthForm() {
     }
 
     try {
-      const { data, error } = await auth.signUp(
+      const { data, error, message } = await auth.signUp(
         formData.email, 
         formData.password,
         {
@@ -120,32 +120,14 @@ export function useAuthForm() {
         setFormState({
           isLoading: false,
           error: null,
-          success: 'Welcome to the escape room! You can now start playing.'
+          success: message || 'Please check your email to confirm your account before signing in.'
         })
-      }
-    } catch (err) {
-      setFormState({
-        isLoading: false,
-        error: 'An unexpected error occurred',
-        success: null
-      })
-    }
-  }
-
-  const handleGitHubSignIn = async () => {
-    setFormState({
-      isLoading: true,
-      error: null,
-      success: null
-    })
-
-    try {
-      const { error } = await auth.signInWithGitHub()
-      if (error) {
-        setFormState({
-          isLoading: false,
-          error: error.message,
-          success: null
+        // Clear the form
+        setFormData({
+          email: '',
+          password: '',
+          firstName: '',
+          lastName: ''
         })
       }
     } catch (err) {
@@ -163,7 +145,6 @@ export function useAuthForm() {
     updateFormData,
     resetFormState,
     handleSignIn,
-    handleSignUp,
-    handleGitHubSignIn
+    handleSignUp
   }
 } 

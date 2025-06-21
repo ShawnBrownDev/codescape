@@ -457,7 +457,7 @@ export const UserProfile = () => {
 
       // Upload the file to Supabase storage
       const { error: uploadError } = await supabase.storage
-        .from('profile-avatars')
+        .from('avatars')
         .upload(filePath, file, {
           cacheControl: '3600',
           upsert: true
@@ -469,7 +469,7 @@ export const UserProfile = () => {
 
       // Get the public URL
       const { data: { publicUrl } } = supabase.storage
-        .from('profile-avatars')
+        .from('avatars')
         .getPublicUrl(filePath)
 
       // Update the user profile with the new avatar URL
@@ -484,7 +484,7 @@ export const UserProfile = () => {
       if (updateError) {
         // If profile update fails, try to delete the uploaded image
         await supabase.storage
-          .from('profile-avatars')
+          .from('avatars')
           .remove([filePath])
         throw updateError
       }
@@ -493,10 +493,10 @@ export const UserProfile = () => {
       if (profileData?.avatar_url) {
         try {
           const oldUrl = new URL(profileData.avatar_url)
-          const oldPath = oldUrl.pathname.split('/profile-avatars/')[1]
+          const oldPath = oldUrl.pathname.split('/avatars/')[1]
           if (oldPath && oldPath !== filePath) {
             await supabase.storage
-              .from('profile-avatars')
+              .from('avatars')
               .remove([oldPath])
           }
         } catch (error) {
@@ -537,7 +537,7 @@ export const UserProfile = () => {
 
       // Get the file path from the URL
       const url = new URL(profileData.avatar_url);
-      const filePath = url.pathname.split('/profile-avatars/')[1];
+      const filePath = url.pathname.split('/avatars/')[1];
 
       if (!filePath) {
         throw new Error('Invalid avatar URL');
@@ -545,7 +545,7 @@ export const UserProfile = () => {
 
       // Delete the file from storage
       const { error: deleteStorageError } = await supabase.storage
-        .from('profile-avatars')
+        .from('avatars')
         .remove([filePath]);
 
       if (deleteStorageError) {

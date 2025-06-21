@@ -52,25 +52,46 @@ export function useAuthForm() {
     })
 
     try {
+      console.log('Starting sign in process...');
       const { data, error } = await auth.signIn(formData.email, formData.password)
+      
       if (error) {
+        console.error('Sign in error:', error);
+        let errorMessage = error.message;
+        
+        // Handle specific error cases
+        if (error.message?.includes('Invalid login credentials')) {
+          errorMessage = 'Invalid email or password. Please try again.';
+        } else if (error.message?.includes('Email not confirmed')) {
+          errorMessage = 'Please verify your email address before signing in.';
+        }
+        
         setFormState({
           isLoading: false,
-          error: error.message,
+          error: errorMessage,
           success: null
         })
-      } else if (data.user) {
+      } else if (data?.user) {
+        console.log('Sign in successful');
         setFormState({
           isLoading: false,
           error: null,
           success: 'Welcome back, escape artist!'
         })
-        router.push('/')
+        router.push('/dashboard')
+      } else {
+        console.error('No user data returned');
+        setFormState({
+          isLoading: false,
+          error: 'Unable to sign in. Please try again.',
+          success: null
+        })
       }
     } catch (err) {
+      console.error('Unexpected error during sign in:', err);
       setFormState({
         isLoading: false,
-        error: 'An unexpected error occurred',
+        error: err instanceof Error ? err.message : 'An unexpected error occurred',
         success: null
       })
     }

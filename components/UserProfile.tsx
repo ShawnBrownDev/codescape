@@ -47,6 +47,22 @@ export const UserProfile = () => {
   const missionsChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const previousXPRef = useRef<number>(0)
   const animationFrameRef = useRef<number>()
+  const isMounted = useRef(true)
+
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (xpChannelRef.current) {
+      xpChannelRef.current.unsubscribe()
+      xpChannelRef.current = null
+    }
+    if (missionsChannelRef.current) {
+      missionsChannelRef.current.unsubscribe()
+      missionsChannelRef.current = null
+    }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
+  }, [])
 
   const animateXPChange = useCallback((startXP: number, endXP: number) => {
     const duration = 1000 // 1 second animation
@@ -110,7 +126,7 @@ export const UserProfile = () => {
   }, [currentRank, toast, animateXPChange])
 
   const fetchUserProfile = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || !isMounted.current) return;
     
     try {
       // Fetch profile data
@@ -122,14 +138,51 @@ export const UserProfile = () => {
 
       if (profileError) throw profileError;
 
+      // Only proceed if still mounted and user exists
+      if (!isMounted.current || !user) return;
+
       // Fetch XP data
       const { data: xpData, error: xpError } = await supabase
         .from('user_xp')
         .select('total_xp, current_level')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       if (xpError) throw xpError;
+
+      // Only proceed if still mounted and user exists
+      if (!isMounted.current || !user) return;
+
+      // If no XP record exists, create one
+      if (!xpData) {
+        const { data: newXpData, error: createError } = await supabase
+          .from('user_xp')
+          .insert({
+            user_id: user.id,
+            total_xp: 0,
+            current_level: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select('total_xp, current_level')
+          .single();
+
+        if (createError) throw createError;
+
+        // Only proceed if still mounted and user exists
+        if (!isMounted.current || !user) return;
+
+        if (newXpData) {
+          setUserXP(newXpData);
+          await updateRankInfo(newXpData.total_xp);
+        }
+      } else {
+        setUserXP(xpData);
+        await updateRankInfo(xpData.total_xp);
+      }
+
+      // Only proceed if still mounted and user exists
+      if (!isMounted.current || !user) return;
 
       // Fetch completed missions count
       const { count: missionsCount, error: missionsError } = await supabase
@@ -140,13 +193,11 @@ export const UserProfile = () => {
 
       if (missionsError) throw missionsError;
 
+      // Only proceed if still mounted and user exists
+      if (!isMounted.current || !user) return;
+
       if (profileData) {
         setProfileData(profileData);
-      }
-      
-      if (xpData) {
-        setUserXP(xpData);
-        await updateRankInfo(xpData.total_xp);
       }
 
       setMissionCount(missionsCount || 0);
@@ -154,24 +205,16 @@ export const UserProfile = () => {
     } catch (error) {
       console.error('Error fetching user data:', error);
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   }, [user, updateRankInfo]);
 
   useEffect(() => {
     if (user) {
+      cleanup(); // Clean up existing subscriptions
       fetchUserProfile();
-
-      // Clean up existing subscriptions
-      if (xpChannelRef.current) {
-        xpChannelRef.current.unsubscribe();
-      }
-      if (missionsChannelRef.current) {
-        missionsChannelRef.current.unsubscribe();
-      }
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current)
-      }
 
       // Create new channel for XP with optimistic updates
       xpChannelRef.current = supabase.channel(`user_xp_${user.id}`)
@@ -182,7 +225,7 @@ export const UserProfile = () => {
           table: 'user_xp',
           filter: `user_id=eq.${user.id}`
         }, async (payload) => {
-          if (payload.new) {
+          if (payload.new && isMounted.current) {
             const newXP = payload.new as UserXP
             await updateRankInfo(newXP.total_xp, true) // Animate the change
           }
@@ -198,6 +241,8 @@ export const UserProfile = () => {
           table: 'user_missions',
           filter: `user_id=eq.${user.id}`
         }, async (payload) => {
+          if (!isMounted.current) return;
+          
           if (payload.eventType === 'INSERT' && payload.new.completed) {
             // Optimistically update mission count
             setMissionCount(prev => prev + 1)
@@ -210,32 +255,28 @@ export const UserProfile = () => {
             .eq('user_id', user.id)
             .eq('completed', true)
           
-          setMissionCount(count || 0)
+          if (isMounted.current) {
+            setMissionCount(count || 0)
+          }
         })
         .subscribe()
-
-      return () => {
-        // Clean up subscriptions and animations
-        if (xpChannelRef.current) {
-          xpChannelRef.current.unsubscribe()
-          xpChannelRef.current = null
-        }
-        if (missionsChannelRef.current) {
-          missionsChannelRef.current.unsubscribe()
-          missionsChannelRef.current = null
-        }
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current)
-        }
-      }
     }
-  }, [user, fetchUserProfile, updateRankInfo])
+
+    return () => {
+      isMounted.current = false;
+      cleanup();
+    }
+  }, [user, fetchUserProfile, cleanup]);
 
   const handleSignOut = async () => {
     if (loading) return; // Prevent multiple clicks
     
     try {
       setLoading(true)
+      
+      // Clean up subscriptions before signing out
+      cleanup();
+      
       const { error } = await signOut()
       
       if (error && error.message !== 'Auth session missing!') {
@@ -259,7 +300,9 @@ export const UserProfile = () => {
       })
       console.error('Unexpected error during sign out:', error)
     } finally {
-      setLoading(false)
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
   }
 

@@ -3,9 +3,22 @@
 import { useState, useEffect } from 'react'
 import Editor from '@monaco-editor/react'
 import { Button } from '@/components/ui/button'
-import { createClient } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { AlertCircle, CheckCircle2, Timer, PlayCircle, Trophy, HelpCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+
+// Add Monaco type declaration
+declare global {
+  interface Window {
+    monaco?: {
+      editor: {
+        getModels: () => Array<{
+          dispose: () => void;
+        }>;
+      };
+    };
+  }
+}
 
 interface CodeEditorProps {
   puzzleId: number
@@ -85,7 +98,6 @@ export default function CodeEditor({ puzzleId, initialCode, testCases, timeLimit
   const [showHint, setShowHint] = useState(false)
   const [isTestRun, setIsTestRun] = useState(false)
   const [mountKey, setMountKey] = useState(0)
-  const supabase = createClient()
 
   // Reset state when puzzle changes
   useEffect(() => {
@@ -99,7 +111,7 @@ export default function CodeEditor({ puzzleId, initialCode, testCases, timeLimit
     setMountKey(prev => prev + 1)
 
     // Clear any stored code in Monaco
-    window.monaco?.editor.getModels().forEach(model => {
+    window.monaco?.editor.getModels().forEach((model) => {
       model.dispose()
     })
   }, [puzzleId, initialCode, timeLimit])

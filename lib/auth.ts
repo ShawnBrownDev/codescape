@@ -1,8 +1,99 @@
-import { supabase } from './supabase'
 import type { User } from '@supabase/supabase-js'
+import { Database } from '@/types/supabase'
+import { supabase } from './supabase'
 import { initializeRanks } from './supabase'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 
 export type AuthUser = User | null
+type Tables = Database['public']['Tables']
+type UserProgress = Tables['user_progress']['Row']
+type UserProgressInsert = Tables['user_progress']['Insert']
+type UserProgressUpdate = Tables['user_progress']['Update']
+type UserXP = Tables['user_xp']['Insert']
+
+export async function updateUserProgress(
+  userId: string,
+  completedChallengeId: number,
+  unlockedSkills: string[],
+  earnedXP: number
+) {
+  try {
+    // Get current user progress
+    const { data: existingProgress, error: fetchError } = await supabase
+      .from('user_progress')
+      .select()
+      .match({ user_id: userId })
+      .single()
+
+    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "not found"
+      throw fetchError
+    }
+
+    const progress = existingProgress as UserProgress | null
+    const newTotalXP = (progress?.total_xp ?? 0) + earnedXP
+    
+    // Get user's new rank based on total XP
+    const { data: ranks } = await supabase
+      .from('ranks')
+      .select()
+      .lte('min_xp', newTotalXP)
+      .gte('max_xp', newTotalXP)
+      .single()
+
+    const newRank = (ranks as Tables['ranks']['Row'] | null)?.level ?? 1
+
+    const newProgress: UserProgressInsert = {
+      user_id: userId,
+      completed_challenges: [
+        ...(progress?.completed_challenges ?? []),
+        completedChallengeId
+      ],
+      unlocked_skills: [
+        ...(progress?.unlocked_skills ?? []),
+        ...unlockedSkills
+      ].filter((value, index, self) => self.indexOf(value) === index), // Remove duplicates
+      total_xp: newTotalXP,
+      current_rank: newRank,
+      updated_at: new Date().toISOString()
+    }
+
+    if (!existingProgress) {
+      // Create new progress record
+      const { error: insertError } = await supabase
+        .from('user_progress')
+        .insert([newProgress])
+
+      if (insertError) throw insertError
+    } else {
+      // Update existing progress
+      const updateData: UserProgressUpdate = {
+        completed_challenges: newProgress.completed_challenges,
+        unlocked_skills: newProgress.unlocked_skills,
+        total_xp: newProgress.total_xp,
+        current_rank: newProgress.current_rank,
+        updated_at: newProgress.updated_at
+      }
+
+      const { error: updateError } = await supabase
+        .from('user_progress')
+        .update(updateData)
+        .eq('user_id', userId)
+
+      if (updateError) throw updateError
+    }
+
+    return {
+      success: true,
+      data: newProgress
+    }
+  } catch (error) {
+    console.error('Error updating user progress:', error)
+    return {
+      success: false,
+      error
+    }
+  }
+}
 
 export const auth = {
   // Sign up with email and password
@@ -54,7 +145,7 @@ export const auth = {
         email,
         password,
       })
-      
+
       if (error) {
         console.error('Sign in error details:', {
           message: error.message,
@@ -70,8 +161,8 @@ export const auth = {
           // Check if profile exists
           const { data: profileData, error: profileError } = await supabase
             .from('user_profiles')
-            .select('*')
-            .eq('id', data.user.id)
+            .select()
+            .match({ id: data.user.id })
             .maybeSingle();
 
           if (profileError) {
@@ -92,17 +183,18 @@ export const auth = {
           }
 
           // Always try to upsert XP record
+          const xpData: UserXP = {
+            user_id: data.user.id,
+            total_xp: 0,
+            current_level: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+
           const { error: xpError } = await supabase
             .from('user_xp')
-            .upsert({
-              user_id: data.user.id,
-              total_xp: 0,
-              current_level: 1,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }, {
-              onConflict: 'user_id'
-            });
+            .upsert(xpData)
+            .match({ user_id: data.user.id })
 
           if (xpError && xpError.code !== '23505') { // Ignore duplicate key errors
             console.error('Error upserting XP record:', xpError);
@@ -126,11 +218,11 @@ export const auth = {
       return { data, error }
     } catch (err) {
       console.error('Unexpected sign in error:', err);
-      return { 
-        data: null, 
+      return {
+        data: null,
         error: { 
           message: err instanceof Error ? err.message : 'An unexpected error occurred during sign in'
-        } 
+        }
       };
     }
   },

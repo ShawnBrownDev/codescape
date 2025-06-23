@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { UserProfile } from '@/components/UserProfile'
+import UserProfile from '@/components/UserProfile'
 import { useMissions } from '@/hooks/use-missions'
 import { SimulationSection } from '@/components/simulation/SimulationSection'
 import { InstructionList } from '@/components/simulation/InstructionList'
@@ -45,40 +45,36 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-12 gap-6">
-          {/* User Profile Column */}
-          <div className="col-span-12 lg:col-span-3">
-            <div className="sticky top-8 space-y-6">
-              <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-                <UserProfile />
-              </div>
-              <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-                <InstructionList 
-                  title="Training Protocol"
-                  instructions={TRAINING_INSTRUCTIONS}
-                />
-              </div>
-              <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-                <QuickTip 
-                  title="Agent's Note"
-                  content="Remember: The Matrix is everywhere. It is all around us. Even now, in this very room. You can see it when you look out your window or when you turn on your television. You can feel it when you go to work... when you go to church... when you pay your taxes."
-                />
-              </div>
+          {/* Left Column - Profile and Instructions */}
+          <div className="col-span-12 lg:col-span-4">
+            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
+              <UserProfile />
+            </div>
+            <div className="mt-6 bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
+              <InstructionList 
+                title="Training Protocol"
+                instructions={TRAINING_INSTRUCTIONS}
+              />
+            </div>
+            <div className="mt-6 bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
+              <QuickTip 
+                title="Agent's Note"
+                content="Remember: The Matrix is everywhere. It is all around us. Even now, in this very room. You can see it when you look out your window or when you turn on your television. You can feel it when you go to work... when you go to church... when you pay your taxes."
+              />
             </div>
           </div>
 
-          {/* Main Content Column */}
-          <div className="col-span-12 lg:col-span-9">
-            <div className="space-y-6">
-              <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-                <SimulationSection onStartSimulation={handleStartSimulation} />
-              </div>
-              <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-                <DailyMissions 
-                  missions={missions} 
-                  getMissionProgress={getMissionProgress}
-                  updateMissionProgress={updateMissionProgress}
-                />
-              </div>
+          {/* Right Column - Active Simulation and Missions */}
+          <div className="col-span-12 lg:col-span-8">
+            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6 mb-6">
+              <SimulationSection onStartSimulation={handleStartSimulation} />
+            </div>
+            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
+              <DailyMissions 
+                missions={missions} 
+                getMissionProgress={getMissionProgress}
+                updateMissionProgress={updateMissionProgress}
+              />
             </div>
           </div>
         </div>

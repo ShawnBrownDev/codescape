@@ -4,44 +4,30 @@ import { Inter } from 'next/font/google';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { MatrixBackground } from '@/components/MatrixBackground';
 import { Toaster } from '@/components/ui/toaster';
-import { initializeRanks } from '@/lib/supabase';
+import { NavigationMenu, NavigationMenuItem, NavigationMenuList, NavigationMenuLink, navigationMenuTriggerStyle } from '@/components/ui/navigation-menu';
+import Link from 'next/link';
 
 const inter = Inter({ subsets: ['latin'] });
 
-// Initialize ranks table
-initializeRanks().catch(console.error);
-
 export const metadata: Metadata = {
-  title: 'Codescape - Ultimate Puzzle Adventure',
-  description: 'Challenge your mind with immersive escape rooms. Solve puzzles, crack codes, and race against time in thrilling adventures.',
-};
+  title: 'CodeScape',
+  description: 'Enter the Matrix. Train your mind.',
+}
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="h-full">
-      <body 
-        className={`${inter.className} min-h-full bg-black relative`}
-        style={{ isolation: 'isolate' }}
-      >
-        <MatrixBackground />
+    <html lang="en" className="dark">
+      <body className={inter.className}>
         <AuthProvider>
-          <main 
-            className="relative"
-            style={{ 
-              zIndex: 1,
-              minHeight: '100vh',
-              width: '100%',
-            }}
-          >
+          <MatrixBackground />
           {children}
-          </main>
           <Toaster />
         </AuthProvider>
       </body>
     </html>
-  );
+  )
 }

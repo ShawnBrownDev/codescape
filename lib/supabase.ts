@@ -1,15 +1,11 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createBrowserClient } from '@supabase/ssr'
 import { Database } from '@/types/supabase'
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClientComponentClient<Database>({
-  options: {
-    global: {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      }
-    },
+export const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
     realtime: {
       params: {
         eventsPerSecond: 2
@@ -19,7 +15,13 @@ export const supabase = createClientComponentClient<Database>({
       schema: 'public'
     }
   }
-})
+)
+
+// Export the instance with an alias for components expecting supabaseInstance
+export const supabaseInstance = supabase
+
+// For components that need a client instance, return the singleton
+export const createSupabaseClient = () => supabase
 
 // Function to get all available challenges
 export async function fetchAvailableChallenges() {
@@ -83,12 +85,6 @@ export async function fetchMatrixChallenge(challengeId: number) {
     throw error;
   }
 }
-
-// Export the instance with an alias for components expecting supabaseInstance
-export const supabaseInstance = supabase
-
-// For components that need a client instance, return the singleton
-export const createSupabaseClient = () => supabase
 
 export async function initializeRanks() {
   const { error: createError } = await supabase.rpc('create_ranks_table');

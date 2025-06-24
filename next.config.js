@@ -23,6 +23,13 @@ const nextConfig = {
       'utf-8-validate': 'utf-8-validate',
     });
 
+    // Handle critical dependency warning
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      'utf-8-validate': false,
+      bufferutil: false,
+    };
+
     return config;
   },
   async redirects() {
@@ -33,6 +40,11 @@ const nextConfig = {
         permanent: true,
       },
     ]
+  },
+  experimental: {
+    serverActions: {
+      allowedOrigins: ['localhost:3000'],
+    },
   },
 };
 

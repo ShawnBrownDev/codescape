@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogOut, Mail, Calendar, Terminal, Shield, Upload, Trash2, Loader2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { createSupabaseClient } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { initializeRanks } from '@/lib/supabase'
 import { useToast } from '@/hooks/use-toast'
 import { calculateRankFromDB, calculateProgress, formatXP, type RankInfo, fetchRanks } from '@/lib/utils'
@@ -18,7 +18,6 @@ import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { RealtimeChannel, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import type { Database } from '@/types/supabase'
-import { createClientComponentClient, type SupabaseClient } from '@supabase/auth-helpers-nextjs'
 
 type UserProfileRow = Database['public']['Tables']['user_profiles']['Row']
 type UserProfileInsert = Database['public']['Tables']['user_profiles']['Insert']
@@ -50,18 +49,17 @@ interface RealtimePayload {
   old: { xp: number }
 }
 
-interface UserProgressPayload {
-  id: number;
-  user_id: string;
-  completed_challenges: number[];
-  unlocked_skills: string[];
-  total_xp: number;
-  current_rank: number;
-  created_at: string;
-  updated_at: string;
-}
-
 type UserProgress = Database['public']['Tables']['user_progress']['Row']
+
+interface ProgressChangePayload {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  new: UserProgress
+  old: UserProgress | null
+  schema: 'public'
+  table: 'user_progress'
+  commit_timestamp: string
+  errors: null | unknown[]
+}
 
 // Helper functions
 function getDisplayNameFromProfile(profile: UserProfileData | null): string {
@@ -110,9 +108,6 @@ export default function UserProfile() {
   const animationFrameRef = useRef<number>()
   const isMounted = useRef(true)
   const channelRef = useRef<RealtimeChannel | null>(null)
-  
-  // Create a single Supabase client instance
-  const supabase = useMemo(() => createClientComponentClient<Database>(), [])
 
   // Cleanup function for channels
   const cleanup = useCallback(() => {
@@ -252,79 +247,36 @@ export default function UserProfile() {
             // Create initial progress record
             const { data: newProgress, error: createError } = await supabase
               .from('user_progress')
-              .insert({
+              .upsert([{
                 user_id: user.id,
                 completed_challenges: [],
-                unlocked_skills: ['basic-syntax'],
+                unlocked_skills: [],
                 total_xp: 0,
                 current_rank: 1,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
+              }], {
+                onConflict: 'user_id'
               })
               .select()
               .single();
 
-            if (createError) throw createError;
-
-            if (newProgress) {
-              setUserXP({
-                total_xp: newProgress.total_xp,
-                current_level: newProgress.current_rank
-              });
-              setMissionCount(newProgress.completed_challenges.length);
-              await updateRankInfo(newProgress.total_xp);
+            if (createError) {
+              throw createError;
             }
-          } else if (progressError.code === 'ERR_INSUFFICIENT_RESOURCES' && retryCount < maxRetries) {
-            // If we hit a resource error, wait and retry
-            retryCount++;
-            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
-            return await fetchWithRetry();
-          } else {
-            throw progressError;
+
+            return { profile: fetchedProfile, progress: newProgress };
           }
-        } else if (progressData) {
-          setUserXP({
-            total_xp: progressData.total_xp,
-            current_level: progressData.current_rank
-          });
-          setMissionCount(progressData.completed_challenges.length);
-          await updateRankInfo(progressData.total_xp);
-        }
-
-        // Set profile data from user_profiles table if it exists, otherwise use auth data
-        if (fetchedProfile) {
-          setProfileData(fetchedProfile);
-        } else {
-          // Create initial profile
-          const initialProfile: UserProfileInsert = {
-            id: user.id,
-            username: user.email?.split('@')[0] || 'Operator',
-            first_name: user.user_metadata?.first_name || '',
-            last_name: user.user_metadata?.last_name || '',
-            display_name: `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim() || null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          };
-
-          const { data: newProfile, error: createError } = await supabase
-            .from('user_profiles')
-            .insert(initialProfile)
-            .select()
-            .single();
-
-          if (newProfile) {
-            setProfileData(newProfile);
-          }
+          throw progressError;
         }
 
         return { profile: fetchedProfile, progress: progressData };
       } catch (error) {
         console.error('Error fetching user data:', error);
-        if (retryCount < maxRetries && error instanceof Error && error.message.includes('ERR_INSUFFICIENT_RESOURCES')) {
-          // If we hit a resource error, wait and retry
+        if (retryCount < maxRetries) {
           retryCount++;
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
-          return await fetchWithRetry();
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+          return fetchWithRetry();
         }
         throw error;
       }
@@ -347,257 +299,148 @@ export default function UserProfile() {
       console.error('Error in fetchUserProfile:', error);
       toast({
         title: "Error",
-        description: "Failed to load your profile data. Please try refreshing.",
+        description: "Failed to load profile data. Please try again.",
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  }, [user, updateRankInfo, toast, supabase]);
+  }, [user, toast, updateRankInfo]);
 
   useEffect(() => {
-    // Set isMounted to true when the component mounts
-    isMounted.current = true;
-    
-    if (user) {
-      // Clean up existing subscriptions before setting up new ones
-      cleanup();
-      
-      // Only proceed if still mounted
-      if (isMounted.current) {
-        fetchUserProfile();
-      }
+    fetchUserProfile();
 
-      // Only set up subscriptions if still mounted
-      if (isMounted.current) {
-        // Create new channel for XP with optimistic updates
-        xpChannelRef.current = supabase.channel(`user_xp_${user.id}`)
-        xpChannelRef.current
-          .on('postgres_changes', {
-            event: '*',
-            schema: 'public',
-            table: 'user_xp',
-            filter: `user_id=eq.${user.id}`
-          }, async (payload) => {
-            if (payload.new && isMounted.current) {
-              const newXP = payload.new as UserXP;
-              await updateRankInfo(newXP.total_xp, true);
-            }
-          })
-          .subscribe();
-
-        // Create new channel for missions with optimistic updates
-        missionsChannelRef.current = supabase.channel(`user_missions_${user.id}`)
-        missionsChannelRef.current
-          .on('postgres_changes', {
-            event: '*',
-            schema: 'public',
-            table: 'user_missions',
-            filter: `user_id=eq.${user.id}`
-          }, async (payload) => {
-            if (!isMounted.current) return;
-            
-            if (payload.eventType === 'INSERT' && payload.new.completed) {
-              setMissionCount(prev => prev + 1);
-            }
-          })
-          .subscribe();
-      }
-    } else {
-      // Reset state when user is not available
-      setProfileData(null);
-      setUserXP(null);
-      setCurrentRank(null);
-      setNextRank(null);
-      setProgressToNextRank(0);
-      setMissionCount(0);
-      setLoading(false);
+    // Subscribe to user progress changes
+    if (user?.id) {
+      channelRef.current = supabase
+        .channel('user_progress_changes')
+        .on('postgres_changes' as any, {
+          event: '*',
+          schema: 'public',
+          table: 'user_progress',
+          filter: `user_id=eq.${user.id}`,
+        }, async (payload: { eventType: string; new: UserProgress | null; old: UserProgress | null }) => {
+          if (payload.eventType === 'DELETE') return;
+          
+          const newData = payload.new;
+          if (newData) {
+            setUserXP({
+              total_xp: newData.total_xp,
+              current_level: newData.current_rank
+            });
+            setMissionCount(newData.completed_challenges.length);
+            await updateRankInfo(newData.total_xp, true);
+          }
+        })
+        .subscribe();
     }
 
-    // Cleanup function
     return () => {
-      isMounted.current = false;
       cleanup();
+      isMounted.current = false;
     };
-  }, [user, cleanup, fetchUserProfile, updateRankInfo, supabase]);
+  }, [user, cleanup, fetchUserProfile, updateRankInfo]);
 
   const handleSignOut = async () => {
-    if (loading) return; // Prevent multiple clicks
-    
     try {
-      setLoading(true);
-      
-      // Immediately mark as unmounted and reset all state
-      isMounted.current = false;
-      
-      // Cancel any pending requests
-      cleanup();
-      
-      // Reset all state synchronously
-      setProfileData(null);
-      setUserXP(null);
-      setCurrentRank(null);
-      setNextRank(null);
-      setProgressToNextRank(0);
-      setMissionCount(0);
-      
-      // Sign out
-      const { error } = await signOut();
-      
-      // Redirect regardless of error (unless it's a network error)
+      await signOut();
       router.push('/');
-      
-      // Only show error for actual failures
-      if (error && error.message !== 'Auth session missing!') {
-        console.error('Error signing out:', error);
-      }
-      
     } catch (error) {
-      console.error('Unexpected error during sign out:', error);
+      console.error('Error signing out:', error);
+      toast({
+        title: "Error",
+        description: "Failed to sign out. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const isValidProfileData = (data: UserProfileData | null): data is UserProfileData => {
-    return data !== null
-  }
-
-  const getDisplayName = useCallback((): string => {
-    return getDisplayNameFromProfile(profileData)
-  }, [profileData])
-
-  const getInitials = useCallback((): string => {
-    return getInitialsFromProfile(profileData)
-  }, [profileData])
+    return data !== null;
+  };
 
   const getAvatarUrl = (url: string | null | undefined): string => {
-    if (!url) return ''
-    // Ensure we're using the direct storage URL format
-    if (!url.includes('/storage/v1/object/public/')) {
-      const parts = url.split('/avatars/')
-      if (parts.length === 2) {
-        return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${parts[1]}`
-      }
-    }
-    return url
-  }
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${url}`;
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
-      month: 'long'
-    })
-  }
+      month: 'long',
+      day: 'numeric'
+    });
+  };
 
-  // Update the XP display in the UI
   const XPDisplay = ({ xp, currentRank, nextRank, progress }: { 
     xp: number, 
     currentRank: RankInfo | null,
     nextRank: RankInfo | null,
     progress: number 
   }) => (
-    <div className="w-full space-y-1">
-      <div className="flex justify-between items-center text-xs text-green-400">
-        <span>{formatXP(xp)} XP</span>
-        <span>{formatXP(nextRank?.min_xp || 0)} XP needed for {nextRank?.title || 'Next Level'}</span>
+    <div className="mt-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center space-x-2">
+          <Shield className="h-4 w-4 text-green-400" />
+          <span className="text-sm font-mono text-green-400">
+            {currentRank?.title || 'Loading...'}
+          </span>
+        </div>
+        <span className="text-sm font-mono text-green-400">
+          {formatXP(xp)} XP
+        </span>
       </div>
-      <Progress value={progress} className="h-1 bg-black">
-        <div 
-          className="h-full bg-green-500 transition-all duration-500"
-          style={{ width: `${progress}%` }}
-        />
-      </Progress>
-      <div className="flex justify-between text-xs">
-        <span className="text-green-400">Operator Level {currentRank?.level || 1}</span>
-        <span className="text-green-400">Operator Level {(currentRank?.level || 1) + 1}</span>
-      </div>
+      <Progress value={progress} className="h-2" />
+      {nextRank && (
+        <div className="flex justify-between mt-1">
+          <span className="text-xs font-mono text-green-500/70">
+            Current: {formatXP(currentRank?.min_xp || 0)} XP
+          </span>
+          <span className="text-xs font-mono text-green-500/70">
+            Next: {formatXP(nextRank.min_xp)} XP
+          </span>
+        </div>
+      )}
     </div>
   );
-
-  // Add real-time subscription to user_progress
-  useEffect(() => {
-    if (!user) return;
-
-    const channel = supabase
-      .channel(`user_progress_${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_progress',
-          filter: `user_id=eq.${user.id}`
-        },
-        async (payload: RealtimePostgresChangesPayload<UserProgress>) => {
-          if (payload.eventType === 'DELETE') return;
-          
-          const newData = payload.new;
-          setUserXP({
-            total_xp: newData.total_xp,
-            current_level: newData.current_rank
-          });
-          setMissionCount(newData.completed_challenges.length);
-          await updateRankInfo(newData.total_xp);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
-  }, [user, updateRankInfo, supabase]);
 
   if (!user) {
     return null;
   }
 
-  if (loading) {
-    return (
-      <div className="p-6">
-          <div className="animate-pulse space-y-4">
-          <div className="h-20 w-20 bg-green-900/30 rounded-full mx-auto"></div>
-          <div className="h-4 bg-green-900/30 rounded w-3/4 mx-auto"></div>
-          <div className="h-4 bg-green-900/30 rounded w-1/2 mx-auto"></div>
-        </div>
-          </div>
-    );
-  }
-
-  if (!currentRank) {
-    return (
-      <div className="p-6">
-        <div className="text-center text-green-400">
-          Initializing profile data...
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col w-full max-w-sm space-y-4">
-      <div className="flex items-start space-x-3">
-        <Avatar className="h-12 w-12 border-2 border-green-500">
-          <AvatarImage 
-            src={getAvatarUrlFromProfile(profileData) || undefined} 
-            alt={getDisplayNameFromProfile(profileData)} 
-          />
-          <AvatarFallback className="bg-black text-green-500">
-            {getInitialsFromProfile(profileData)}
-          </AvatarFallback>
-        </Avatar>
-        
-        <div className="flex-1">
-          <div className="flex items-center space-x-2">
-            <h2 className="text-lg font-semibold text-green-500">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <Avatar className="h-12 w-12 border-2 border-green-500/30">
+            <AvatarImage
+              src={getAvatarUrl(profileData?.avatar_url)}
+              alt={getDisplayNameFromProfile(profileData)}
+            />
+            <AvatarFallback className="bg-green-900/20 text-green-400">
+              {getInitialsFromProfile(profileData)}
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <h2 className="text-lg font-mono text-green-400">
               {getDisplayNameFromProfile(profileData)}
             </h2>
-          </div>
-          <div className="flex items-center space-x-2 text-sm text-green-400">
-            <Terminal className="w-4 h-4" />
-            <span>{missionCount} Missions</span>
-            <Shield className="w-4 h-4 ml-2" />
-            <span>Operator Level {currentRank?.level || 1}</span>
+            <p className="text-sm font-mono text-green-500/70">
+              Joined {profileData ? formatDate(profileData.created_at) : 'Loading...'}
+            </p>
           </div>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSignOut}
+          className="font-mono text-xs border-green-500/30 text-green-400 hover:bg-green-950/50"
+        >
+          <LogOut className="h-4 w-4 mr-1" />
+          Sign Out
+        </Button>
       </div>
 
       {userXP && currentRank && (
@@ -609,33 +452,11 @@ export default function UserProfile() {
         />
       )}
 
-      <div className="space-y-1.5 text-sm">
-        <div className="flex items-center text-green-400">
-          <Mail className="w-4 h-4 mr-2" />
-          <span>{user?.email}</span>
+      {loading && (
+        <div className="flex justify-center py-4">
+          <Loader2 className="h-6 w-6 animate-spin text-green-400" />
         </div>
-        <div className="flex items-center text-green-400">
-          <Calendar className="w-4 h-4 mr-2" />
-          <span>Joined {profileData?.created_at ? formatDate(profileData.created_at) : 'Unknown'}</span>
-        </div>
-        <div className="flex items-center text-green-400">
-          <Terminal className="w-4 h-4 mr-2" />
-          <span>Basic Training</span>
-        </div>
-        <div className="flex items-center text-green-400">
-          <Shield className="w-4 h-4 mr-2" />
-          <span>Novice Operator</span>
-        </div>
-      </div>
-
-      <Button
-        variant="outline"
-        className="w-full mt-2 border-red-500 text-red-500 hover:bg-red-950/30"
-        onClick={handleSignOut}
-      >
-        <LogOut className="w-4 h-4 mr-2" />
-        Terminate Session
-      </Button>
+      )}
     </div>
   );
 }

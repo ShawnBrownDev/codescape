@@ -1,9 +1,10 @@
 'use client'
 
+import { Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import WinnerScreen from '@/components/simulation/WinnerScreen'
 
-export default function WinnerPage() {
+function WinnerContent() {
     const searchParams = useSearchParams()
     
     // Get data from URL parameters
@@ -23,5 +24,13 @@ export default function WinnerPage() {
                 }}
             />
         </div>
+    )
+}
+
+export default function WinnerPage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <WinnerContent />
+        </Suspense>
     )
 } 

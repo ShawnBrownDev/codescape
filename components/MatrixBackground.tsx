@@ -47,8 +47,6 @@ export const MatrixBackground = () => {
     // Use a thinner font weight for more authentic look
     ctx.font = `${fontSize}px "MS Gothic", monospace`;
     
-    // Enable subpixel rendering for sharper text
-    ctx.textRendering = 'optimizeLegibility';
 
     const draw = () => {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';

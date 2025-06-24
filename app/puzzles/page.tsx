@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 import CodeEditor from '@/components/simulation/CodeEditor'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -24,7 +24,6 @@ interface Puzzle {
 export default function PuzzlesPage() {
   const [puzzles, setPuzzles] = useState<Puzzle[]>([])
   const [selectedPuzzle, setSelectedPuzzle] = useState<Puzzle | null>(null)
-  const supabase = createClient()
   const { toast } = useToast()
 
   useEffect(() => {
@@ -46,7 +45,7 @@ export default function PuzzlesPage() {
     }
 
     fetchPuzzles()
-  }, [supabase])
+  }, [])
 
   return (
     <div className="container mx-auto py-8">

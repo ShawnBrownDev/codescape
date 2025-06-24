@@ -207,18 +207,21 @@ export default function UserProfile() {
     const maxRetries = 3;
     let retryCount = 0;
     
-    const fetchWithRetry = async () => {
+    const fetchWithRetry = async (): Promise<{
+      profile: UserProfileData | null;
+      progress: UserProgress | null;
+    }> => {
       try {
         // First verify we have an active session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         if (sessionError || !session) {
           setLoading(false);
-          return; // Just return silently if no session
+          return { profile: null, progress: null }; // Just return silently if no session
         }
 
         // Check if still mounted after session check
         if (!isMounted.current) {
-          return;
+          return { profile: null, progress: null };
         }
 
         // Fetch user profile data first
@@ -241,7 +244,7 @@ export default function UserProfile() {
 
         // Check if still mounted after progress fetch
         if (!isMounted.current) {
-          return;
+          return { profile: null, progress: null };
         }
 
         if (progressError) {
@@ -314,6 +317,7 @@ export default function UserProfile() {
           }
         }
 
+        return { profile: fetchedProfile, progress: progressData };
       } catch (error) {
         console.error('Error fetching user data:', error);
         if (retryCount < maxRetries && error instanceof Error && error.message.includes('ERR_INSUFFICIENT_RESOURCES')) {
@@ -327,7 +331,18 @@ export default function UserProfile() {
     };
 
     try {
-      await fetchWithRetry();
+      const { profile, progress } = await fetchWithRetry();
+      if (profile) {
+        setProfileData(profile);
+      }
+      if (progress) {
+        setUserXP({
+          total_xp: progress.total_xp,
+          current_level: progress.current_rank
+        });
+        setMissionCount(progress.completed_challenges.length);
+        await updateRankInfo(progress.total_xp);
+      }
     } catch (error) {
       console.error('Error in fetchUserProfile:', error);
       toast({

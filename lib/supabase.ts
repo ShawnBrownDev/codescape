@@ -93,22 +93,71 @@ export async function initializeRanks() {
     return;
   }
 
-  // Update ranks with new colors
+  // Update ranks with proper colors and required challenges
   const { error: updateError } = await supabase
     .from('ranks')
     .upsert([
-      { level: 1, title: 'Operator Level 1', min_xp: 0, max_xp: 999, color: 'text-emerald-400' },
-      { level: 2, title: 'Operator Level 2', min_xp: 1000, max_xp: 2499, color: 'text-cyan-400' },
-      { level: 3, title: 'Operator Level 3', min_xp: 2500, max_xp: 4999, color: 'text-fuchsia-400' },
-      { level: 4, title: 'Senior Operator', min_xp: 5000, max_xp: 9999, color: 'text-amber-400' },
-      { level: 5, title: 'Matrix Controller', min_xp: 10000, max_xp: 19999, color: 'text-rose-400' },
-      { level: 6, title: 'Matrix Architect', min_xp: 20000, max_xp: 49999, color: 'text-violet-400' },
-      { level: 7, title: 'The One', min_xp: 50000, max_xp: 2147483647, color: 'text-white' }
+      { 
+        level: 1, 
+        title: 'Operator Level 1', 
+        min_xp: 0, 
+        max_xp: 999, 
+        color: 'text-emerald-400',
+        required_challenges: [1, 2, 3]
+      },
+      { 
+        level: 2, 
+        title: 'Operator Level 2', 
+        min_xp: 1000, 
+        max_xp: 2499, 
+        color: 'text-cyan-400',
+        required_challenges: [4, 5, 6]
+      },
+      { 
+        level: 3, 
+        title: 'Operator Level 3', 
+        min_xp: 2500, 
+        max_xp: 4999, 
+        color: 'text-fuchsia-400',
+        required_challenges: [7, 8, 9]
+      },
+      { 
+        level: 4, 
+        title: 'Senior Operator', 
+        min_xp: 5000, 
+        max_xp: 9999, 
+        color: 'text-amber-400',
+        required_challenges: [10, 11]
+      },
+      { 
+        level: 5, 
+        title: 'Matrix Controller', 
+        min_xp: 10000, 
+        max_xp: 19999, 
+        color: 'text-rose-400',
+        required_challenges: null
+      },
+      { 
+        level: 6, 
+        title: 'Matrix Architect', 
+        min_xp: 20000, 
+        max_xp: 49999, 
+        color: 'text-violet-400',
+        required_challenges: null
+      },
+      { 
+        level: 7, 
+        title: 'The One', 
+        min_xp: 50000, 
+        max_xp: 2147483647, 
+        color: 'text-white',
+        required_challenges: null
+      }
     ], {
       onConflict: 'level'
     });
 
   if (updateError) {
-    console.error('Error updating rank colors:', updateError);
+    console.error('Error updating ranks:', updateError);
   }
 }

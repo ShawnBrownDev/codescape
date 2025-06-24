@@ -7,12 +7,14 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export interface RankInfo {
-  id: number;
   level: number;
   title: string;
   min_xp: number;
   max_xp: number;
   color: string;
+  required_challenges: number[] | null;
+  created_at: string;
+  updated_at: string;
 }
 
 async function initializeRanks() {
@@ -59,12 +61,8 @@ export async function fetchRanks(): Promise<RankInfo[]> {
     }
 
     if (!data || data.length === 0) {
-      // Try to initialize ranks using RPC
-      const { error: createError } = await supabase.rpc('create_ranks_table');
-      if (createError) {
-        console.error('Error creating ranks table:', createError);
-        return []; // Return empty array if initialization fails
-      }
+      // Try to initialize ranks
+      await initializeRanks();
 
       // Retry fetching ranks after initialization
       const { data: retryData, error: retryError } = await supabase
@@ -88,23 +86,29 @@ export async function fetchRanks(): Promise<RankInfo[]> {
 }
 
 export async function calculateRankFromDB(xp: number): Promise<RankInfo | null> {
-  const { data, error } = await supabase
-    .from('ranks')
-    .select('*')
-    .lte('min_xp', xp)
-    .gte('max_xp', xp)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('ranks')
+      .select('*')
+      .lte('min_xp', xp)
+      .gte('max_xp', xp)
+      .single();
 
-  if (error) {
-    console.error('Error calculating rank:', error);
+    if (error) {
+      console.error('Error calculating rank:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error in calculateRankFromDB:', error);
     return null;
   }
-
-  return data;
 }
 
-export function calculateProgress(xp: number, currentRank: RankInfo, nextRank: RankInfo | null): number {
-  if (!nextRank) return 100;
+export function calculateProgress(xp: number, currentRank: RankInfo | null, nextRank: RankInfo | null): number {
+  if (!currentRank) return 0;
+  if (!nextRank) return 100; // At max rank
   
   const xpInCurrentRank = xp - currentRank.min_xp;
   const totalXPInRank = currentRank.max_xp - currentRank.min_xp;

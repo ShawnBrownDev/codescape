@@ -95,46 +95,115 @@ export async function updateUserProgress(
   }
 }
 
+export async function initializeUserData(userId: string) {
+  try {
+    console.log('Starting user data initialization for:', userId);
+    // First check if user progress exists
+    const { data: existingProgress, error: checkError } = await supabase
+      .from('user_progress')
+      .select()
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (checkError) {
+      console.error('Error checking user progress:', checkError);
+      return;
+    }
+
+    // If progress exists, no need to initialize
+    if (existingProgress) {
+      console.log('User progress already exists:', existingProgress);
+      return;
+    }
+
+    console.log('No existing progress found, creating initial records...');
+    // Create initial progress record with retry logic
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        console.log(`Attempt ${retryCount + 1} to create user progress...`);
+        const { error: createError } = await supabase
+          .from('user_progress')
+          .upsert([{
+            user_id: userId,
+            completed_challenges: [],
+            unlocked_skills: [],
+            total_xp: 0,
+            current_rank: 1,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }], {
+            onConflict: 'user_id',
+            ignoreDuplicates: true
+          });
+
+        if (!createError) {
+          console.log('Successfully created user progress');
+          break; // Success, exit the retry loop
+        }
+
+        console.error(`Error creating user progress (attempt ${retryCount + 1}):`, createError);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      } catch (err) {
+        console.error(`Unexpected error in user progress creation (attempt ${retryCount + 1}):`, err);
+        retryCount++;
+        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+      }
+    }
+
+    // Initialize ranks if needed
+    console.log('Checking and initializing ranks...');
+    await initializeRanks();
+    console.log('User data initialization complete');
+  } catch (err) {
+    console.error('Error in initializeUserData:', err);
+  }
+}
+
 export const auth = {
   // Sign up with email and password
-  signUp: async (email: string, password: string, metadata: { first_name: string; last_name: string }) => {
+  signUp: async (
+    email: string,
+    password: string,
+    metadata: {
+      first_name: string;
+      last_name: string;
+    }
+  ) => {
     try {
-      if (!metadata?.first_name?.trim() || !metadata?.last_name?.trim()) {
-        return { 
-          data: null, 
-          error: { message: 'First name and last name are required' } 
-        }
-      }
-
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: {
-            first_name: metadata.first_name.trim(),
-            last_name: metadata.last_name.trim()
-          }
-        }
+          data: metadata,
+        },
       })
 
       if (error) {
-        return { data: null, error };
+        return {
+          data: null,
+          error,
+          message: null,
+        }
       }
 
-      // Return success without trying to create profile or XP record
-      // These will be created on first sign in after email confirmation
-      return { 
-        data, 
+      return {
+        data,
         error: null,
-        message: 'Please check your email to confirm your account before signing in.'
-      };
-
+        message: 'Please check your email to confirm your account before signing in.',
+      }
     } catch (err) {
-      console.error('Signup error:', err);
+      console.error('Unexpected sign up error:', err)
       return {
         data: null,
-        error: { message: 'An unexpected error occurred during signup' }
-      };
+        error: {
+          message: err instanceof Error ? err.message : 'An unexpected error occurred during sign up',
+        },
+        message: null,
+      }
     }
   },
 
@@ -172,8 +241,8 @@ export const auth = {
             const { error: createError } = await supabase.rpc('create_user_profile', {
               user_id: data.user.id,
               user_email: data.user.email || '',
-              first_name: data.user.user_metadata?.first_name || null,
-              last_name: data.user.user_metadata?.last_name || null,
+              first_name: data.user.user_metadata?.first_name || '',
+              last_name: data.user.user_metadata?.last_name || '',
               username: null // Let the function generate it from first and last name
             });
 
@@ -182,33 +251,21 @@ export const auth = {
             }
           }
 
-          // Always try to upsert XP record
-          const xpData: UserXP = {
-            user_id: data.user.id,
-            total_xp: 0,
-            current_level: 1,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
+          // Initialize all user data with retry logic
+          let retryCount = 0;
+          const maxRetries = 3;
 
-          const { error: xpError } = await supabase
-            .from('user_xp')
-            .upsert(xpData)
-            .match({ user_id: data.user.id })
-
-          if (xpError && xpError.code !== '23505') { // Ignore duplicate key errors
-            console.error('Error upserting XP record:', xpError);
-          }
-
-          // Initialize ranks if needed
-          const { data: ranksData, error: ranksError } = await supabase
-            .from('ranks')
-            .select('count');
-
-          if (ranksError) {
-            console.error('Error checking ranks:', ranksError);
-          } else if (!ranksData || ranksData.length === 0) {
-            await initializeRanks();
+          while (retryCount < maxRetries) {
+            try {
+              await initializeUserData(data.user.id);
+              break; // Success, exit the retry loop
+            } catch (err) {
+              console.error(`Error initializing user data (attempt ${retryCount + 1}):`, err);
+              retryCount++;
+              if (retryCount < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+              }
+            }
           }
         } catch (err) {
           console.error('Error in profile initialization:', err);

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useEffect, useState, useRef } from 'react'
+import { supabaseInstance } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export interface Mission {
   id: string
@@ -47,6 +48,10 @@ export function useMissions() {
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  
+  // Create refs for subscriptions
+  const userMissionsChannelRef = useRef<RealtimeChannel | null>(null)
+  const userXPChannelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
     if (!user) {
@@ -57,7 +62,7 @@ export function useMissions() {
       setLoading(true)
 
       // Fetch missions
-      const { data: missionsData, error: missionsError } = await supabase
+      const { data: missionsData, error: missionsError } = await supabaseInstance
         .from('missions')
         .select('*')
 
@@ -69,7 +74,7 @@ export function useMissions() {
       setMissions(missionsData as Mission[] || [])
 
       // Fetch user missions
-      const { data: userMissionsData, error: userMissionsError } = await supabase
+      const { data: userMissionsData, error: userMissionsError } = await supabaseInstance
         .from('user_missions')
         .select('*')
         .eq('user_id', user.id)
@@ -82,7 +87,7 @@ export function useMissions() {
       setUserMissions(userMissionsData as UserMission[] || [])
 
       // Fetch user XP
-      const { data: userXPData, error: userXPError } = await supabase
+      const { data: userXPData, error: userXPError } = await supabaseInstance
         .from('user_xp')
         .select('*')
         .eq('user_id', user.id)
@@ -95,7 +100,7 @@ export function useMissions() {
 
       if (!userXPData) {
         // Create initial XP record if it doesn't exist
-        const { data: newXPData, error: createError } = await supabase
+        const { data: newXPData, error: createError } = await supabaseInstance
           .from('user_xp')
           .upsert([{
             user_id: user.id,
@@ -130,7 +135,7 @@ export function useMissions() {
     fetchData()
 
     // Subscribe to user missions changes
-    const userMissionsSubscription = supabase
+    userMissionsChannelRef.current = supabaseInstance
       .channel('user_missions_changes')
       .on<UserMission>(
         'postgres_changes' as never,
@@ -156,7 +161,7 @@ export function useMissions() {
       .subscribe()
 
     // Subscribe to user XP changes
-    const userXPSubscription = supabase
+    userXPChannelRef.current = supabaseInstance
       .channel('user_xp_changes')
       .on<UserXP>(
         'postgres_changes' as never,
@@ -173,17 +178,21 @@ export function useMissions() {
       .subscribe()
 
     return () => {
-      userMissionsSubscription.unsubscribe()
-      userXPSubscription.unsubscribe()
+      if (userMissionsChannelRef.current) {
+        userMissionsChannelRef.current.unsubscribe()
+      }
+      if (userXPChannelRef.current) {
+        userXPChannelRef.current.unsubscribe()
+      }
     }
-  }, [user, supabase])
+  }, [user]) // Remove supabase from dependencies
 
   const updateMissionProgress = async (missionId: string) => {
     if (!user) {
       return
     }
 
-    const { data, error } = await supabase.rpc('complete_mission', {
+    const { data, error } = await supabaseInstance.rpc('complete_mission', {
       p_user_id: user.id,
       p_mission_id: missionId,
     })

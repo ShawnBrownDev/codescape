@@ -1,12 +1,90 @@
-import { createClient } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
+import { Database } from '@/types/supabase'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-export const supabase = createClient(
+// Create a single supabase client for interacting with your database
+export const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    realtime: {
+      params: {
+        eventsPerSecond: 2
+      }
+    },
+    db: {
+      schema: 'public'
+    }
+  }
 )
+
+// Export the instance with an alias for components expecting supabaseInstance
+export const supabaseInstance = supabase
+
+// For components that need a client instance, return the singleton
+export const createSupabaseClient = () => supabase
+
+// Function to get all available challenges
+export async function fetchAvailableChallenges() {
+  try {
+    const { data, error } = await supabase
+      .from('matrix_challenges')
+      .select('id')
+      .order('id', { ascending: true });
+    
+    if (error) {
+      console.error('Error fetching available challenges:', error);
+      throw error;
+    }
+    
+    return data?.map(c => c.id) || [];
+  } catch (error) {
+    console.error('Error in fetchAvailableChallenges:', error);
+    throw error;
+  }
+}
+
+// Export a function to get challenges that properly handles the response type
+export async function fetchMatrixChallenge(challengeId: number) {
+  try {
+    // First try to get the requested challenge
+    const { data, error } = await supabase
+      .from('matrix_challenges')
+      .select('*')
+      .eq('id', challengeId)
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Error fetching challenge:', error);
+      throw error;
+    }
+    
+    // If challenge not found, get the first available challenge
+    if (!data) {
+      const { data: firstChallenge, error: firstError } = await supabase
+        .from('matrix_challenges')
+        .select('*')
+        .order('id', { ascending: true })
+        .limit(1)
+        .single();
+      
+      if (firstError) {
+        console.error('Error fetching first challenge:', firstError);
+        throw firstError;
+      }
+      
+      if (!firstChallenge) {
+        throw new Error('No challenges available');
+      }
+      
+      return firstChallenge;
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error in fetchMatrixChallenge:', error);
+    throw error;
+  }
+}
 
 export async function initializeRanks() {
   const { error: createError } = await supabase.rpc('create_ranks_table');

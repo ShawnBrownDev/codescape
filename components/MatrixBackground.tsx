@@ -6,7 +6,7 @@ export const MatrixBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
-    const canvas = document.getElementById('matrix-bg') as HTMLCanvasElement;
+    const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
@@ -22,44 +22,80 @@ export const MatrixBackground = () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Matrix code setup
-    const fontSize = 14;
-    const columns = Math.floor(canvas.width / fontSize);
-    const drops: number[] = new Array(columns).fill(1);
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%^&*()';
+    // Matrix code setup with authentic character set
+    const fontSize = 24;
+    const columns = Math.floor(canvas.width / (fontSize * 2));
+    
+    // Initialize drops with random starting positions
+    const drops: number[] = new Array(columns).fill(0).map(() => 
+      Math.floor(Math.random() * -100) // Start above viewport at random positions
+    );
+    
+    // More authentic Matrix character set
+    const katakana = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ';
+    const hiragana = 'あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん'; 
+    const numbers = '012345678９';
+    const chars = katakana + hiragana + numbers;
+    
+    const speed = 1.5;
 
-    ctx.font = `${fontSize}px monospace`;
+    // Random delays for each column
+    const delays: number[] = new Array(columns).fill(0).map(() => 
+      Math.floor(Math.random() * 100)
+    );
+
+    // Use a thinner font weight for more authentic look
+    ctx.font = `${fontSize}px "MS Gothic", monospace`;
+    
 
     const draw = () => {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = '#0F0';
       drops.forEach((y, i) => {
+        // Only update if past delay
+        if (delays[i] > 0) {
+          delays[i]--;
+          return;
+        }
+
         const text = chars[Math.floor(Math.random() * chars.length)];
-        const x = i * fontSize;
+        const x = i * (fontSize * 2);
+        
+        // Slightly brighter green for better visibility
+        ctx.fillStyle = 'rgba(0, 255, 70, 0.45)';
         ctx.fillText(text, x, y * fontSize);
 
-        if (y * fontSize > canvas.height && Math.random() > 0.975) {
+        // Reset when reaching bottom with random delay
+        if (y * fontSize > canvas.height) {
           drops[i] = 0;
+          delays[i] = Math.floor(Math.random() * 50); // Random delay before next drop
         }
-        drops[i]++;
+        drops[i] += speed;
       });
+
+      setTimeout(() => {
+        requestAnimationFrame(draw);
+      }, 200);
     };
 
-    const interval = setInterval(draw, 33);
+    draw();
 
     return () => {
-      clearInterval(interval);
       window.removeEventListener('resize', resizeCanvas);
     };
   }, []);
 
   return (
-    <canvas
-      id="matrix-bg"
-      className="fixed top-0 left-0 w-full h-full -z-10"
-      style={{ background: 'black' }}
-    />
+    <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full"
+        style={{ 
+          background: '#000',
+          opacity: 0.35,
+        }}
+      />
+    </div>
   );
 }; 

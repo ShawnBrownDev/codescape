@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { fetchMatrixChallenge, fetchAvailableChallenges } from '@/lib/supabase'
-import { updateUserProgress } from '@/lib/auth'
+import { updateUserProgress, initializeUserData } from '@/lib/auth'
 import Intro from './Intro'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -145,8 +145,10 @@ function MatrixRoom() {
             if (!user || authLoading) return;
             
             try {
-                
                 setState(prev => ({ ...prev, isLoading: true, showWinnerScreen: false }));
+                
+                // Initialize user data if needed
+                await initializeUserData(user.id);
                 
                 // Get user progress
                 const { data: userProgress, error: progressError } = await supabase
@@ -154,54 +156,20 @@ function MatrixRoom() {
                     .select('*')
                     .eq('user_id', user.id)
                     .single();
-                
 
                 if (progressError) {
-                    // If no record exists, create one
-                    if (progressError.code === 'PGRST116') {
-                        
-                        const defaultProgress = {
-                            completed: [] as number[],
-                            currentLevel: 1,
-                            unlockedSkills: ['basic-syntax'] as string[],
-                            totalXP: 0
-                        };
+                    console.error('Error fetching user progress:', progressError);
+                    // Use default values if fetch fails
+                    setProgress({
+                        completed: [],
+                        currentLevel: 1,
+                        unlockedSkills: ['basic-syntax'],
+                        totalXP: 0
+                    });
+                    return;
+                }
 
-                        const newProgressData: Database['public']['Tables']['user_progress']['Insert'] = {
-                            user_id: user.id,
-                            completed_challenges: defaultProgress.completed,
-                            unlocked_skills: defaultProgress.unlockedSkills,
-                            total_xp: defaultProgress.totalXP,
-                            current_rank: defaultProgress.currentLevel,
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString()
-                        };
-
-                        const { data: newProgress, error: createError } = await supabase
-                            .from('user_progress')
-                            .insert([newProgressData])
-                            .select()
-                            .single();
-
-                        
-
-                        if (createError) {
-                            throw createError;
-                        }
-
-                        // Since we just inserted the data with known values, we can safely cast it
-                        const progress = newProgress as Database['public']['Tables']['user_progress']['Row'];
-                        setProgress({
-                            completed: progress.completed_challenges,
-                            currentLevel: progress.current_rank,
-                            unlockedSkills: progress.unlocked_skills,
-                            totalXP: progress.total_xp
-                        });
-                    } else {
-                        throw progressError;
-                    }
-                } else if (userProgress) {
-                   
+                if (userProgress) {
                     // Since this is a direct database query result, we can safely cast it
                     const progress = userProgress as Database['public']['Tables']['user_progress']['Row'];
                     setProgress({
@@ -210,26 +178,19 @@ function MatrixRoom() {
                         unlockedSkills: progress.unlocked_skills,
                         totalXP: progress.total_xp
                     });
-                } else {
-                    // Use default values if type guard fails
-                    setProgress({
-                        completed: [],
-                        currentLevel: 1,
-                        unlockedSkills: ['basic-syntax'],
-                        totalXP: 0
-                    });
                 }
-                
+
                 // Get user's rank
                 const { data: ranks, error: ranksError } = await supabase
                     .from('ranks')
                     .select('*')
                     .order('level', { ascending: true });
-                
-                
 
-                if (ranksError) throw ranksError;
-                
+                if (ranksError) {
+                    console.error('Error fetching ranks:', ranksError);
+                    return;
+                }
+
                 if (ranks) {
                     const currentRank = ranks.find(rank => 
                         rank && 
@@ -239,8 +200,6 @@ function MatrixRoom() {
                         progress.totalXP <= rank.max_xp
                     );
                     
-                   
-
                     if (currentRank) {
                         setUserRank({
                             title: currentRank.title,
@@ -399,14 +358,7 @@ function MatrixRoom() {
                         // Add current challenge to session completed challenges
                         const updatedSessionChallenges = [...state.sessionChallenges, state.currentChallenge];
                         
-                        // Debug logging
-                        console.log('Challenge completion state:', {
-                            completedCount: updatedSessionChallenges.length,
-                            totalAvailable: state.availableChallenges.length,
-                            isLastChallenge: updatedSessionChallenges.length === state.availableChallenges.length,
-                            completedChallenges: updatedSessionChallenges.map(c => c.id),
-                            availableChallenges: state.availableChallenges.map(c => c.id)
-                        });
+                       
 
                         // Calculate total XP earned in this session
                         const sessionXP = updatedSessionChallenges.reduce(
@@ -416,7 +368,6 @@ function MatrixRoom() {
 
                         // Check if this was the last challenge
                         if (updatedSessionChallenges.length === state.availableChallenges.length) {
-                            console.log('Session complete - showing winner screen');
                             
                             // Show different messages based on rank progression
                             const rankUpMessage = newProgress.current_rank > (state.sessionRank ?? 0)
@@ -443,7 +394,6 @@ function MatrixRoom() {
                         }
 
                         // If not the last challenge, move to the next one
-                        console.log('Moving to next challenge');
                         const nextChallenge = state.availableChallenges[updatedSessionChallenges.length];
                         
                         setState(prev => ({ 
@@ -477,7 +427,6 @@ function MatrixRoom() {
 
     // If winner screen is showing, return it immediately before any other rendering
     if (state.showWinnerScreen) {
-        console.log('Rendering winner screen component');
         return (
             <WinnerScreen
                 totalXP={progress.totalXP}
@@ -487,7 +436,7 @@ function MatrixRoom() {
                     color: userRank.color
                 }}
                 onContinueTraining={() => {
-                    console.log('Continue training clicked');
+                    
                     // Reset state completely before loading new challenges
                     setState(prev => ({ 
                         ...prev, 

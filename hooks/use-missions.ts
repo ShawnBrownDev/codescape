@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
-import { supabaseInstance } from '@/lib/supabase'
+import { supabase as supabaseInstance } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { initializeUserData } from '@/lib/auth'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export interface Mission {
@@ -109,12 +110,13 @@ export function useMissions() {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           }], {
-            onConflict: 'user_id'
+            onConflict: 'user_id',
+            ignoreDuplicates: true
           })
           .select()
           .single()
 
-        if (createError && createError.code !== '23505') { // Ignore duplicate key errors
+        if (createError) {
           console.error('Error creating initial XP record:', createError)
           return
         }

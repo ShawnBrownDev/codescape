@@ -294,23 +294,50 @@ function MatrixRoom() {
     }
 
     const evaluateCode = async (code: string, testCases: Challenge['content']['test_cases']) => {
-        if (!testCases?.length) return false
+        if (!testCases?.length) return false;
 
         try {
-            // Create a safe evaluation environment
-            const testFunction = new Function('code', `
-                try {
-                ${code}
-                    return true
-                } catch (e) {
-                    return false
-                }
-            `)
+            // Extract the function name from the code
+            const functionNameMatch = code.match(/function\s+(\w+)/);
+            if (!functionNameMatch) {
+                console.error('Could not find function name in code');
+                return false;
+            }
+            const functionName = functionNameMatch[1];
 
-            return testFunction(code)
+            // Create a safe evaluation environment
+            const testFunction = new Function('input', 
+                `try {
+                    ${code}
+                    // If input is an array, spread it as arguments
+                    return Array.isArray(input) ? ${functionName}(...input) : ${functionName}(input);
+                } catch (e) {
+                    console.error('Test execution error:', e);
+                    return null;
+                }`
+            );
+
+            // Run all test cases
+            for (const testCase of testCases) {
+                const result = testFunction(testCase.input);
+
+                // Deep equality comparison for arrays and objects
+                const isEqual = JSON.stringify(result) === JSON.stringify(testCase.expected);
+
+                if (!isEqual) {
+                    console.log('Test failed:', {
+                        input: testCase.input,
+                        expected: testCase.expected,
+                        actual: result
+                    });
+                    return false;
+                }
+            }
+
+            return true;
         } catch (error) {
-            console.error('Code evaluation error:', error)
-            return false
+            console.error('Code evaluation error:', error);
+            return false;
         }
     }
 

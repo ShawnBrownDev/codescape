@@ -18,11 +18,17 @@ import { useRouter } from 'next/navigation'
 
 type BaseChallenge = Database['public']['Tables']['matrix_challenges']['Row']
 
+type TestCase = {
+    input: any;
+    expected: any;
+    result?: any;
+}
+
 interface Challenge extends BaseChallenge {
     required_rank: number;
     content: {
         starter_code: string;
-        test_cases: Array<any>;
+        test_cases: TestCase[];
         hints?: string[];
         example?: string;
     };
@@ -71,6 +77,22 @@ function isUserProgress(data: unknown): data is Database['public']['Tables']['us
     );
 }
 
+
+function TestCaseDetails({ testCases }: { testCases: TestCase[] }) {
+    return (
+        <div className='mt-6 bg-black/30 p-4 rounded-lg border border-green-500/30 flex flex-col space-y-4'>
+            {testCases.map((testCase, index) => (
+                <div key={index} className="mb-4 p-4 bg-black/50 rounded-lg border border-green-500/30 flex flex-row justify-between space-y-2">
+                    <p><strong>Input:</strong> {JSON.stringify(testCase.input)}</p>
+                    <p><strong>Expected:</strong> {JSON.stringify(testCase.expected)}</p>
+                    <p><strong>Result:</strong> {JSON.stringify(testCase.result)}</p>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+
 function MatrixRoom() {
     const [state, setState] = useState<RoomState>({
         isInitialized: false,
@@ -103,6 +125,8 @@ function MatrixRoom() {
         unlockedSkills: ['basic-syntax'],
         totalXP: 0
     })
+    const [testedCases, setTestedCases] = useState<Challenge['content']['test_cases']>([])
+
     const { user, loading: authLoading } = useAuth()
     const { toast } = useToast()
     const router = useRouter()
@@ -274,6 +298,8 @@ function MatrixRoom() {
                     showWinnerScreen: false
                 }));
 
+                setTestedCases(selectedChallenges[0].content.test_cases || []);
+
         } catch (error) {
                 console.error('Error loading challenges:', error);
                 setState(prev => ({ 
@@ -318,17 +344,26 @@ function MatrixRoom() {
             );
 
             // Run all test cases
-            for (const testCase of testCases) {
+            const tested: TestCase[] = testCases.map(testCase => {
                 const result = testFunction(testCase.input);
+                return {
+                    input: testCase.input,
+                    expected: testCase.expected,
+                    result: result
+                };
+            });
 
-                // Deep equality comparison for arrays and objects
-                const isEqual = JSON.stringify(result) === JSON.stringify(testCase.expected);
+            // Store tested cases as state
+            setTestedCases(tested);
+
+            for (const testCase of tested) {
+                const isEqual = JSON.stringify(testCase.result) === JSON.stringify(testCase.expected);
 
                 if (!isEqual) {
                     console.log('Test failed:', {
                         input: testCase.input,
                         expected: testCase.expected,
-                        actual: result
+                        actual: testCase.result
                     });
                     return false;
                 }
@@ -538,9 +573,9 @@ function MatrixRoom() {
     return (
         <div className="relative z-10">
             <div className="max-w-4xl mx-auto bg-black/80 border border-green-500/30 rounded-lg p-8 backdrop-blur-sm shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-        <div className="space-y-6 text-green-400">
+                <div className="space-y-6 text-green-400">
                     <div className="space-y-6">
-            <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between">
                             <h2 className="text-3xl font-bold flex items-center gap-2">
                                 {state.currentChallenge.type === 'tutorial' && <BookOpen className="h-6 w-6" />}
                                 {state.currentChallenge.type === 'practice' && <Code className="h-6 w-6" />}
@@ -557,7 +592,7 @@ function MatrixRoom() {
                         <div className="bg-black/30 p-4 rounded-lg border border-green-500/30">
                             <h3 className="text-lg font-semibold mb-2">Mission Briefing</h3>
                             <p className="text-green-400/90">{state.currentChallenge.description}</p>
-                    </div>
+                        </div>
 
                         {state.currentChallenge.content.example && (
                             <div className="bg-black/30 p-4 rounded-lg border border-green-500/30">
@@ -566,48 +601,50 @@ function MatrixRoom() {
                             </div>
                         )}
 
-                <div>
-                        <Textarea
+                        <div>
+                            <Textarea
                                 value={state.userCode}
                                 onChange={(e) => setState(prev => ({ ...prev, userCode: e.target.value }))}
-                            className="font-mono h-48 bg-black/50 border-green-500/30 text-green-400 placeholder:text-green-500/50"
-                        />
-                    </div>
+                                className="font-mono h-48 bg-black/50 border-green-500/30 text-green-400 placeholder:text-green-500/50"
+                            />
+                        </div>
 
-                    <div className="flex space-x-4">
-                        <Button
-                            onClick={handleSubmit}
-                            className="bg-green-900/20 hover:bg-green-900/40 text-green-400 border-green-500/30"
-                        >
+                        <div className="flex space-x-4">
+                            <Button
+                                onClick={handleSubmit}
+                                className="bg-green-900/20 hover:bg-green-900/40 text-green-400 border-green-500/30"
+                            >
                                 Run Code
-                        </Button>
-                        <Button
+                            </Button>
+                            <Button
                                 onClick={showNextHint}
-                            variant="outline"
-                            className="border-green-500/30 text-green-400 hover:bg-green-900/20"
+                                variant="outline"
+                                className="border-green-500/30 text-green-400 hover:bg-green-900/20"
                                 disabled={!state.currentChallenge.content.hints || state.currentHintIndex >= state.currentChallenge.content.hints.length - 1}
-                        >
+                            >
                                 <Lightbulb className="h-4 w-4 mr-2" />
                                 {state.currentHintIndex === 0 ? 'Get Hint' : 'Next Hint'}
-                        </Button>
-                    </div>
+                            </Button>
+                        </div>
 
                         {state.showHint && state.currentChallenge.content.hints && state.currentChallenge.content.hints[state.currentHintIndex] && (
-                        <Alert className="bg-green-900/20 border-green-500/30">
-                            <AlertDescription className="text-green-400">
+                            <Alert className="bg-green-900/20 border-green-500/30">
+                                <AlertDescription className="text-green-400">
                                     {state.currentChallenge.content.hints[state.currentHintIndex]}
-                            </AlertDescription>
-                        </Alert>
-                    )}
+                                </AlertDescription>
+                            </Alert>
+                        )}
 
                         {state.message && (
                             <Alert className={`border-green-500/30 ${state.message.includes('Success') ? 'bg-green-900/20' : 'bg-red-900/20'}`}>
                                 <AlertDescription className={state.message.includes('Success') ? 'text-green-400' : 'text-red-400'}>
                                     {state.message}
-                            </AlertDescription>
-                        </Alert>
-                    )}
-                </div>
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
+                        <TestCaseDetails testCases={testedCases} />
+                    </div>
                 </div>
             </div>
         </div>

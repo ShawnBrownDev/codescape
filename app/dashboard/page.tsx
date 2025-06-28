@@ -12,73 +12,69 @@ import { TRAINING_INSTRUCTIONS } from '@/data/Constants'
 import { useRouter } from 'next/navigation'
 
 export default function DashboardPage() {
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const { missions, getMissionProgress, updateMissionProgress } = useMissions()
 
   // Redirect to landing if not logged in
   React.useEffect(() => {
-    if (!user) {
+    if (!authLoading && !user) {
       router.push('/')
     }
-  }, [user, router])
+  }, [user, router, authLoading])
 
   const handleStartSimulation = (simulationId: string) => {
     router.push('/rooms')
   }
 
-  if (!user) {
-    return null // Prevent flash of content during redirect
-  }
-
-  return (
-    <main className="min-h-screen bg-black/95 py-8">
-      <div className="container mx-auto px-4">
-        {/* Welcome Section */}
-        <div className="mb-8 bg-black/80 border border-green-500/30 rounded-lg p-6 backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)]">
-          <h1 className="text-3xl font-bold text-green-400 mb-3">
-            Welcome to The Matrix Training Program
-          </h1>
-          <p className="text-green-400/90 text-lg">
-            Choose your simulation carefully. Each one presents unique challenges and opportunities for growth.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-12 gap-6">
-          {/* Left Column - Profile and Instructions */}
-          <div className="col-span-12 lg:col-span-4">
-            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
-              <UserProfile />
+  // Show loading skeleton while auth is being determined
+  if (authLoading) {
+    return (
+      <div className="container mx-auto p-4 space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {/* Profile section loading skeleton */}
+          <div className="flex flex-col items-center space-y-4 p-4 bg-black/20 rounded-lg backdrop-blur-sm border border-green-500/20">
+            <div className="flex items-center space-x-4">
+              <div className="h-20 w-20 rounded-full bg-green-500/10 animate-pulse" />
+              <div className="space-y-2">
+                <div className="h-6 w-32 bg-green-500/10 rounded animate-pulse" />
+                <div className="h-4 w-24 bg-green-500/10 rounded animate-pulse" />
+              </div>
             </div>
-            <div className="mt-6 bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
-              <InstructionList 
-                title="Training Protocol"
-                instructions={TRAINING_INSTRUCTIONS}
-              />
-            </div>
-            <div className="mt-6 bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
-              <QuickTip 
-                title="Agent's Note"
-                content="Remember: The Matrix is everywhere. It is all around us. Even now, in this very room. You can see it when you look out your window or when you turn on your television. You can feel it when you go to work... when you go to church... when you pay your taxes."
-              />
-            </div>
+            <div className="w-full h-4 bg-green-500/10 rounded animate-pulse" />
+            <div className="w-full h-10 bg-green-500/10 rounded animate-pulse" />
           </div>
 
-          {/* Right Column - Active Simulation and Missions */}
-          <div className="col-span-12 lg:col-span-8">
-            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6 mb-6">
-              <SimulationSection onStartSimulation={handleStartSimulation} />
-            </div>
-            <div className="bg-black/80 border border-green-500/30 rounded-lg backdrop-blur-md shadow-[0_0_15px_rgba(0,255,0,0.1)] p-6">
-              <DailyMissions 
-                missions={missions} 
-                getMissionProgress={getMissionProgress}
-                updateMissionProgress={updateMissionProgress}
-              />
-            </div>
+          {/* Main content loading skeleton */}
+          <div className="md:col-span-2 space-y-6">
+            <div className="h-32 bg-black/20 rounded-lg backdrop-blur-sm border border-green-500/20 animate-pulse" />
+            <div className="h-64 bg-black/20 rounded-lg backdrop-blur-sm border border-green-500/20 animate-pulse" />
           </div>
         </div>
       </div>
-    </main>
+    )
+  }
+
+  // Don't render anything if user is not authenticated
+  if (!user) {
+    return null
+  }
+
+  return (
+    <div className="container mx-auto p-4 space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <UserProfile />
+        <div className="md:col-span-2 space-y-6">
+          <SimulationSection onStart={handleStartSimulation} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="space-y-6">
+              <InstructionList instructions={TRAINING_INSTRUCTIONS} />
+              <QuickTip />
+            </div>
+            <DailyMissions missions={missions} />
+          </div>
+        </div>
+      </div>
+    </div>
   )
 } 

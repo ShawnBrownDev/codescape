@@ -125,6 +125,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const getInitialSession = async () => {
       try {
         console.log('Getting initial session...')
+        setLoading(true) // Ensure loading is true before we start
         const { data: { session }, error } = await supabase.auth.getSession()
         
         if (error) {
@@ -162,23 +163,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
     console.log('Setting up auth state change listener...')
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       console.log('Auth state changed:', _event, session ? 'Session exists' : 'No session')
-      if (session) {
-        console.log('Setting user from auth change:', session.user.id)
-        setUser(session.user)
-        setSession(session)
-        // Fetch user data on auth state change
-        await fetchUserData(session.user.id)
-      } else {
-        console.log('No session in auth change, cleaning up...')
-        setUser(null)
-        setSession(null)
-        setProfileData(null)
-        setUserProgress(null)
-        setCurrentRank(null)
-        setNextRank(null)
-        setProgressToNextRank(0)
-        localStorage.removeItem('codescape-auth')
-        localStorage.removeItem(CACHE_KEY)
+      setLoading(true) // Set loading to true when auth state changes
+      try {
+        if (session) {
+          console.log('Setting user from auth change:', session.user.id)
+          setUser(session.user)
+          setSession(session)
+          // Fetch user data on auth state change
+          await fetchUserData(session.user.id)
+        } else {
+          console.log('No session in auth change, cleaning up...')
+          setUser(null)
+          setSession(null)
+          setProfileData(null)
+          setUserProgress(null)
+          setCurrentRank(null)
+          setNextRank(null)
+          setProgressToNextRank(0)
+          localStorage.removeItem('codescape-auth')
+          localStorage.removeItem(CACHE_KEY)
+        }
+      } catch (err) {
+        console.error('Error in auth state change:', err)
+        setError(err instanceof Error ? err.message : 'An unexpected error occurred')
+      } finally {
+        setLoading(false)
       }
     })
 

@@ -68,10 +68,17 @@ export default function DashboardPage() {
           <SimulationSection onStartSimulation={handleStartSimulation} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="space-y-6">
-              <InstructionList instructions={TRAINING_INSTRUCTIONS} />
-              <QuickTip />
+              <InstructionList title="Training Protocol" instructions={TRAINING_INSTRUCTIONS} />
+              <QuickTip 
+                title="Agent's Note"
+                content="Remember: The Matrix is everywhere. It is all around us. Even now, in this very room. You can see it when you look out your window or when you turn on your television. You can feel it when you go to work... when you go to church... when you pay your taxes."
+              />
             </div>
-            <DailyMissions missions={missions} />
+            <DailyMissions 
+              missions={missions}
+              getMissionProgress={getMissionProgress}
+              updateMissionProgress={updateMissionProgress}
+            />
           </div>
         </div>
       </div>

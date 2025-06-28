@@ -66,8 +66,16 @@ export default function UserProfile() {
 
   if (authLoading) {
     return (
-      <div className="flex items-center justify-center p-4">
-        <Loader2 className="h-6 w-6 animate-spin" />
+      <div className="flex flex-col items-center space-y-4 p-4 bg-black/20 rounded-lg backdrop-blur-sm border border-green-500/20">
+        <div className="flex items-center space-x-4">
+          <div className="h-20 w-20 rounded-full bg-green-500/10 animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-6 w-32 bg-green-500/10 rounded animate-pulse" />
+            <div className="h-4 w-24 bg-green-500/10 rounded animate-pulse" />
+          </div>
+        </div>
+        <div className="w-full h-4 bg-green-500/10 rounded animate-pulse" />
+        <div className="w-full h-10 bg-green-500/10 rounded animate-pulse" />
       </div>
     )
   }

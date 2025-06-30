@@ -326,7 +326,7 @@ function MatrixRoom() {
         // Check for banned words
         for (const word of bannedWords) {
             if (code.includes(word)) {
-                setState(prev => ({ ...prev, error: `Usage of banned word detected: ${word}` }));
+                setState(prev => ({ ...prev, message: `Usage of banned word detected: ${word}` }));
                 return false;
             }
         }
@@ -336,7 +336,7 @@ function MatrixRoom() {
             const functionNameMatch = code.match(/function\s+(\w+)/);
             if (!functionNameMatch) {
                 console.error('Could not find function name in code');
-                setState(prev => ({ ...prev, error: "Could not find function name in code." }));
+                setState(prev => ({ ...prev, message: "Could not find function name in code." }));
                 return false;
             }
             const functionName = functionNameMatch[1];

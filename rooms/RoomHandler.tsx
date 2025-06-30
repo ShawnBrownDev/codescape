@@ -322,26 +322,36 @@ function MatrixRoom() {
     const evaluateCode = async (code: string, testCases: Challenge['content']['test_cases']) => {
         if (!testCases?.length) return false;
 
+        const bannedWords = ['eval', 'Function', 'import', 'require', 'console', 'window', 'document', 'XMLHttpRequest', 'fetch', 'supabase'];
+        // Check for banned words
+        for (const word of bannedWords) {
+            if (code.includes(word)) {
+                setState(prev => ({ ...prev, error: `Usage of banned word detected: ${word}` }));
+                return false;
+            }
+        }
+
         try {
             // Extract the function name from the code
             const functionNameMatch = code.match(/function\s+(\w+)/);
             if (!functionNameMatch) {
                 console.error('Could not find function name in code');
+                setState(prev => ({ ...prev, error: "Could not find function name in code." }));
                 return false;
             }
             const functionName = functionNameMatch[1];
 
             // Create a safe evaluation environment
-            const testFunction = new Function('input', 
-                `try {
+            const testFunction = new Function('input', `
+                try {
                     ${code}
                     // If input is an array, spread it as arguments
                     return Array.isArray(input) ? ${functionName}(...input) : ${functionName}(input);
                 } catch (e) {
                     console.error('Test execution error:', e);
                     return null;
-                }`
-            );
+                }
+            `);
 
             // Run all test cases
             const tested: TestCase[] = testCases.map(testCase => {

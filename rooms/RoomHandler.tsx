@@ -16,13 +16,10 @@ import { supabase } from '@/lib/supabase'
 import WinnerScreen from '@/components/simulation/WinnerScreen'
 import { useRouter } from 'next/navigation'
 
-type BaseChallenge = Database['public']['Tables']['matrix_challenges']['Row']
+import { evaluateCode as codeEvaluation } from './CodeEvaluation'
+import type { CodeEvaluationResult, TestCase } from './CodeEvaluation'
 
-type TestCase = {
-    input: any;
-    expected: any;
-    result?: any;
-}
+type BaseChallenge = Database['public']['Tables']['matrix_challenges']['Row']
 
 interface Challenge extends BaseChallenge {
     required_rank: number;
@@ -320,70 +317,10 @@ function MatrixRoom() {
     }
 
     const evaluateCode = async (code: string, testCases: Challenge['content']['test_cases']) => {
-        if (!testCases?.length) return false;
-
-        const bannedWords = ['eval', 'Function', 'import', 'require', 'console', 'window', 'document', 'XMLHttpRequest', 'fetch', 'supabase'];
-        // Check for banned words
-        for (const word of bannedWords) {
-            if (code.includes(word)) {
-                setState(prev => ({ ...prev, message: `Usage of banned word detected: ${word}` }));
-                return false;
-            }
-        }
-
-        try {
-            // Extract the function name from the code
-            const functionNameMatch = code.match(/function\s+(\w+)/);
-            if (!functionNameMatch) {
-                console.error('Could not find function name in code');
-                setState(prev => ({ ...prev, message: "Could not find function name in code." }));
-                return false;
-            }
-            const functionName = functionNameMatch[1];
-
-            // Create a safe evaluation environment
-            const testFunction = new Function('input', `
-                try {
-                    ${code}
-                    // If input is an array, spread it as arguments
-                    return Array.isArray(input) ? ${functionName}(...input) : ${functionName}(input);
-                } catch (e) {
-                    console.error('Test execution error:', e);
-                    return null;
-                }
-            `);
-
-            // Run all test cases
-            const tested: TestCase[] = testCases.map(testCase => {
-                const result = testFunction(testCase.input);
-                return {
-                    input: testCase.input,
-                    expected: testCase.expected,
-                    result: result
-                };
-            });
-
-            // Store tested cases as state
-            setTestedCases(tested);
-
-            for (const testCase of tested) {
-                const isEqual = JSON.stringify(testCase.result) === JSON.stringify(testCase.expected);
-
-                if (!isEqual) {
-                    console.log('Test failed:', {
-                        input: testCase.input,
-                        expected: testCase.expected,
-                        actual: testCase.result
-                    });
-                    return false;
-                }
-            }
-
-            return true;
-        } catch (error) {
-            console.error('Code evaluation error:', error);
-            return false;
-        }
+        const { isValid, message, testCases: tested } = await codeEvaluation(code, testCases);
+        setTestedCases(tested || []);
+        setState(prev => ({ ...prev, message }));
+        return isValid;
     }
 
     const handleSubmit = async () => {
